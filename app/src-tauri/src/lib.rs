@@ -5,6 +5,7 @@ mod codes;
 mod measure;
 mod contract;
 mod ipc;
+mod cost;
 mod variation;
 mod estimate;
 mod rate;
@@ -633,6 +634,15 @@ fn approve_variation(state: tauri::State<AppState>, variation_id: i64) -> Result
 }
 
 #[tauri::command]
+fn save_budget(state: tauri::State<AppState>, project_code: String, amount: String) -> Result<cost::CostPosition, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", Some(&project_code))?;
+        cost::save_budget(&firm.conn, &project_code, &amount)
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -723,7 +733,8 @@ pub fn run() {
             add_contract_item,
             save_certificate,
             save_variation,
-            approve_variation
+            approve_variation,
+            save_budget
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");

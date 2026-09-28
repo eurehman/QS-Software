@@ -24,6 +24,7 @@ import {
   saveCode,
   saveContract,
   saveContractor,
+  saveBudget,
   saveEstimate,
   saveItem,
   saveRate,
@@ -587,7 +588,41 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
           </form>
           <CodePanel projectCode={selected} onError={onError} />
           <ContractPanel projectCode={selected} onError={onError} />
+          <CostPanel projectCode={selected} onError={onError} />
         </>
+      )}
+    </>
+  );
+}
+
+function CostPanel({ projectCode, onError }: { projectCode: string; onError: (message: string) => void }) {
+  const [actual, setActual] = useState("");
+  const [variance, setVariance] = useState("");
+
+  return (
+    <>
+      <h2>Cost</h2>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveBudget(projectCode, String(form.get("budget") ?? ""))
+            .then((position) => {
+              setActual(position.actual);
+              setVariance(position.variance);
+            })
+            .catch((cause: unknown) => onError(text(cause)));
+        }}
+      >
+        <label>Budget<input name="budget" /></label>
+        <div className="actions">
+          <button type="submit">Save budget</button>
+        </div>
+      </form>
+      {variance !== "" && (
+        <p className="muted">
+          Actual from certificates {actual}. Variance {variance}
+        </p>
       )}
     </>
   );

@@ -294,6 +294,13 @@ export async function approveVariation(variationId: number): Promise<{ id: numbe
   return invoke("approve_variation", { variationId });
 }
 
+export async function saveBudget(
+  projectCode: string,
+  amount: string,
+): Promise<{ budget: string; actual: string; variance: string }> {
+  return invoke("save_budget", { projectCode, amount });
+}
+
 export async function saveEstimate(
   projectCode: string,
   kind: "boq" | "area",
