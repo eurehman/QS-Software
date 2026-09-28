@@ -5,6 +5,7 @@ mod codes;
 mod measure;
 mod contract;
 mod ipc;
+mod variation;
 mod estimate;
 mod rate;
 mod project;
@@ -608,6 +609,30 @@ fn save_certificate(
 }
 
 #[tauri::command]
+fn save_variation(
+    state: tauri::State<AppState>,
+    contract_id: i64,
+    kind: String,
+    description: String,
+    amount: String,
+) -> Result<variation::VariationResult, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "variation", None)?;
+        variation::save_variation(&firm.conn, contract_id, &kind, &description, &amount)
+    })
+}
+
+#[tauri::command]
+fn approve_variation(state: tauri::State<AppState>, variation_id: i64) -> Result<variation::VariationResult, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "approve", "variation", None)?;
+        variation::approve_variation(&firm.conn, variation_id)
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -696,7 +721,9 @@ pub fn run() {
             save_contract,
             save_work_order,
             add_contract_item,
-            save_certificate
+            save_certificate,
+            save_variation,
+            approve_variation
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");

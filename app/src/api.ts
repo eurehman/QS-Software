@@ -281,6 +281,19 @@ export async function saveCertificate(
   });
 }
 
+export async function saveVariation(
+  contractId: number,
+  kind: "add" | "omit" | "substitute",
+  description: string,
+  amount: string,
+): Promise<{ id: number; status: string; revisedSum: string }> {
+  return invoke("save_variation", { contractId, kind, description, amount });
+}
+
+export async function approveVariation(variationId: number): Promise<{ id: number; status: string; revisedSum: string }> {
+  return invoke("approve_variation", { variationId });
+}
+
 export async function saveEstimate(
   projectCode: string,
   kind: "boq" | "area",

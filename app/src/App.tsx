@@ -27,6 +27,7 @@ import {
   saveEstimate,
   saveItem,
   saveRate,
+  approveVariation,
   addContractItem,
   addLocation,
   saveProject,
@@ -43,6 +44,7 @@ import {
   PERMISSIONS,
   pickFirmPath,
   saveRole,
+  saveVariation,
   saveWorkOrder,
   saveSheet,
   type AccountStatus,
@@ -596,6 +598,8 @@ function ContractPanel({ projectCode, onError }: { projectCode: string; onError:
   const [value, setValue] = useState("");
   const [netPayable, setNetPayable] = useState("");
   const [thisBill, setThisBill] = useState("");
+  const [variationId, setVariationId] = useState<number | null>(null);
+  const [revisedSum, setRevisedSum] = useState("");
 
   return (
     <>
@@ -658,6 +662,47 @@ function ContractPanel({ projectCode, onError }: { projectCode: string; onError:
             </div>
           </form>
           <p className="muted">Contract value {value}</p>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const kind = String(form.get("kind") ?? "add");
+              if (kind !== "add" && kind !== "omit" && kind !== "substitute") return;
+              void saveVariation(contractId, kind, String(form.get("variation") ?? ""), String(form.get("variationAmount") ?? ""))
+                .then((variation) => {
+                  setVariationId(variation.id);
+                  setRevisedSum(variation.revisedSum);
+                })
+                .catch((cause: unknown) => onError(text(cause)));
+            }}
+          >
+            <label>
+              Variation
+              <select name="kind" defaultValue="add">
+                <option value="add">Add</option>
+                <option value="omit">Omit</option>
+                <option value="substitute">Substitute</option>
+              </select>
+            </label>
+            <label>Description<input name="variation" /></label>
+            <label>Amount<input name="variationAmount" /></label>
+            <div className="actions">
+              <button type="submit">Save variation</button>
+              <button
+                type="button"
+                disabled={variationId === null}
+                onClick={() => {
+                  if (variationId === null) return;
+                  void approveVariation(variationId)
+                    .then((variation) => setRevisedSum(variation.revisedSum))
+                    .catch((cause: unknown) => onError(text(cause)));
+                }}
+              >
+                Approve variation
+              </button>
+            </div>
+          </form>
+          {revisedSum !== "" && <p className="muted">Revised contract sum {revisedSum}</p>}
           <form
             onSubmit={(event) => {
               event.preventDefault();
