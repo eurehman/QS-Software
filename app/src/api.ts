@@ -294,6 +294,20 @@ export async function approveVariation(variationId: number): Promise<{ id: numbe
   return invoke("approve_variation", { variationId });
 }
 
+export type ReportLine = {
+  section: string;
+  label: string;
+  figure: string;
+};
+
+export async function projectReport(projectCode: string): Promise<ReportLine[]> {
+  return invoke("project_report", { projectCode });
+}
+
+export async function exportReport(projectCode: string, path: string): Promise<ReportLine[]> {
+  return invoke("export_report", { projectCode, path });
+}
+
 export async function saveBudget(
   projectCode: string,
   amount: string,

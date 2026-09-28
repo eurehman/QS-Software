@@ -9,6 +9,7 @@ mod cost;
 mod variation;
 mod estimate;
 mod rate;
+mod report;
 mod project;
 mod xlsx;
 mod accounts;
@@ -643,6 +644,24 @@ fn save_budget(state: tauri::State<AppState>, project_code: String, amount: Stri
 }
 
 #[tauri::command]
+fn project_report(state: tauri::State<AppState>, project_code: String) -> Result<Vec<report::ReportLine>, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "reports", Some(&project_code))?;
+        report::screen_report(&firm.conn, &project_code)
+    })
+}
+
+#[tauri::command]
+fn export_report(state: tauri::State<AppState>, project_code: String, path: String) -> Result<Vec<report::ReportLine>, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "export", "reports", Some(&project_code))?;
+        report::export_report(&firm.conn, &project_code, std::path::Path::new(&path))
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -734,7 +753,9 @@ pub fn run() {
             save_certificate,
             save_variation,
             approve_variation,
-            save_budget
+            save_budget,
+            project_report,
+            export_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");

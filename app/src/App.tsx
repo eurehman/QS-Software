@@ -30,10 +30,12 @@ import {
   saveRate,
   approveVariation,
   addContractItem,
+  exportReport,
   addLocation,
   saveProject,
   pickFolder,
   pickXlsxPath,
+  projectReport,
   readXlsx,
   restoreBackup,
   setLocalServer,
@@ -56,6 +58,7 @@ import {
   type LocationNode,
   type MeasureLine,
   type Project,
+  type ReportLine,
   type WorkItem,
 } from "./api";
 
@@ -589,8 +592,51 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
           <CodePanel projectCode={selected} onError={onError} />
           <ContractPanel projectCode={selected} onError={onError} />
           <CostPanel projectCode={selected} onError={onError} />
+          <ReportPanel projectCode={selected} onError={onError} />
         </>
       )}
+    </>
+  );
+}
+
+function ReportPanel({ projectCode, onError }: { projectCode: string; onError: (message: string) => void }) {
+  const [lines, setLines] = useState<ReportLine[]>([]);
+
+  return (
+    <>
+      <h2>Reports</h2>
+      <div className="actions">
+        <button
+          type="button"
+          onClick={() => {
+            void projectReport(projectCode)
+              .then(setLines)
+              .catch((cause: unknown) => onError(text(cause)));
+          }}
+        >
+          Show report
+        </button>
+        <button
+          type="button"
+          disabled={lines.length === 0}
+          onClick={() => {
+            void pickXlsxPath("save").then((path) => {
+              if (!path) return;
+              void exportReport(projectCode, path).catch((cause: unknown) => onError(text(cause)));
+            });
+          }}
+        >
+          Excel
+        </button>
+        <button type="button" disabled={lines.length === 0} onClick={() => window.print()}>
+          Print
+        </button>
+      </div>
+      {lines.map((line, index) => (
+        <p key={`${line.section}-${line.label}-${index}`}>
+          {line.section} {line.label} {line.figure}
+        </p>
+      ))}
     </>
   );
 }
