@@ -5,10 +5,16 @@ alwaysApply: true
 
 # Update canvases after each development step
 
-After a QS work item is implemented and its test has passed, update all three canvases in the same turn before reporting the result:
+The controlling specification requires two different canvases. Do not copy one over the other.
+
+- `targeted-works.canvas.tsx` is the phase register and the reclassified work list. Update phase status here.
+- `progress-done.canvas.tsx` is the history: what was implemented, the limitation that remains, and the date. Do not delete rows.
+- `qs-development.canvas.tsx` is the short overview of phase gates. It is not a third copy.
+
+Paths:
 
 - C:\Users\mrlaptop\.cursor\projects\d-QS-Software\canvases\qs-development.canvas.tsx
 - C:\Users\mrlaptop\.cursor\projects\d-QS-Software\canvases\targeted-works.canvas.tsx
 - C:\Users\mrlaptop\.cursor\projects\d-QS-Software\canvases\progress-done.canvas.tsx
 
-Keep the three files identical. Change the work-register status, add the progress row, refresh the charts and the "Last updated" line, then copy that file over the other two. Do not mark a work item complete in a canvas before its test passes. Do not remove completed rows.
+A prototype test passing does not mark a phase GATE PASSED. A phase becomes GATE PASSED only when its exit criteria pass and the phase gate report says so. Do not remove earlier rows.
