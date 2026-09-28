@@ -20,6 +20,7 @@ import {
   addMeasure,
   listLocations,
   listProjects,
+  saveCertificate,
   saveCode,
   saveContract,
   saveContractor,
@@ -593,6 +594,8 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
 function ContractPanel({ projectCode, onError }: { projectCode: string; onError: (message: string) => void }) {
   const [contractId, setContractId] = useState<number | null>(null);
   const [value, setValue] = useState("");
+  const [netPayable, setNetPayable] = useState("");
+  const [thisBill, setThisBill] = useState("");
 
   return (
     <>
@@ -655,6 +658,42 @@ function ContractPanel({ projectCode, onError }: { projectCode: string; onError:
             </div>
           </form>
           <p className="muted">Contract value {value}</p>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              const certificateNo = Number(form.get("certificateNo") ?? "");
+              void saveCertificate(
+                contractId,
+                certificateNo,
+                String(form.get("previous") ?? ""),
+                String(form.get("workToDate") ?? ""),
+                String(form.get("retentionPercent") ?? ""),
+                String(form.get("advanceRecovery") ?? ""),
+                String(form.get("deductions") ?? ""),
+              )
+                .then((certificate) => {
+                  setThisBill(certificate.thisBill);
+                  setNetPayable(certificate.netPayable);
+                })
+                .catch((cause: unknown) => onError(text(cause)));
+            }}
+          >
+            <label>Certificate no<input name="certificateNo" /></label>
+            <label>Previous<input name="previous" /></label>
+            <label>Work to date<input name="workToDate" /></label>
+            <label>Retention %<input name="retentionPercent" /></label>
+            <label>Advance recovery<input name="advanceRecovery" /></label>
+            <label>Deductions<input name="deductions" /></label>
+            <div className="actions">
+              <button type="submit">Save certificate</button>
+            </div>
+          </form>
+          {netPayable !== "" && (
+            <p className="muted">
+              This bill {thisBill}. Net payable {netPayable}
+            </p>
+          )}
         </>
       )}
     </>

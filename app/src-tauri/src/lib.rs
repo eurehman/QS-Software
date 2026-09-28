@@ -4,6 +4,7 @@ mod backup;
 mod codes;
 mod measure;
 mod contract;
+mod ipc;
 mod estimate;
 mod rate;
 mod project;
@@ -580,6 +581,33 @@ fn add_contract_item(
 }
 
 #[tauri::command]
+fn save_certificate(
+    state: tauri::State<AppState>,
+    contract_id: i64,
+    certificate_no: i64,
+    previous: String,
+    work_to_date: String,
+    retention_percent: String,
+    advance_recovery: String,
+    deductions: String,
+) -> Result<ipc::Certificate, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "ipc", None)?;
+        ipc::save_certificate(
+            &firm.conn,
+            contract_id,
+            certificate_no,
+            &previous,
+            &work_to_date,
+            &retention_percent,
+            &advance_recovery,
+            &deductions,
+        )
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -667,7 +695,8 @@ pub fn run() {
             save_contractor,
             save_contract,
             save_work_order,
-            add_contract_item
+            add_contract_item,
+            save_certificate
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");

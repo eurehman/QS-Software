@@ -250,6 +250,37 @@ export async function addContractItem(
   return invoke("add_contract_item", { contractId, description, quantity, rate });
 }
 
+export type Certificate = {
+  id: number;
+  certificateNo: number;
+  previous: string;
+  thisBill: string;
+  retention: string;
+  advanceRecovery: string;
+  deductions: string;
+  netPayable: string;
+};
+
+export async function saveCertificate(
+  contractId: number,
+  certificateNo: number,
+  previous: string,
+  workToDate: string,
+  retentionPercent: string,
+  advanceRecovery: string,
+  deductions: string,
+): Promise<Certificate> {
+  return invoke("save_certificate", {
+    contractId,
+    certificateNo,
+    previous,
+    workToDate,
+    retentionPercent,
+    advanceRecovery,
+    deductions,
+  });
+}
+
 export async function saveEstimate(
   projectCode: string,
   kind: "boq" | "area",
