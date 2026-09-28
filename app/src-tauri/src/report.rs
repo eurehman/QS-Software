@@ -83,6 +83,9 @@ pub fn screen_report(conn: &Connection, project_code: &str) -> Result<Vec<Report
             figure: net_payable,
         });
     }
+    for (section, label, figure) in crate::intermediate::report_lines(conn, project_code)? {
+        lines.push(ReportLine { section, label, figure });
+    }
     Ok(lines)
 }
 

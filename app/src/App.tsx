@@ -10,6 +10,8 @@ import {
   createBackup,
   createFirm,
   createUser,
+  certifyBill,
+  comparativeStatement,
   currentFirm,
   assignRole,
   loadSheet,
@@ -18,17 +20,26 @@ import {
   listItems,
   listMeasures,
   addMeasure,
+  addMaterialMove,
+  addQuoteLine,
   listLocations,
   listProjects,
   saveCertificate,
+  saveCommitment,
   saveCode,
   saveContract,
   saveContractor,
   saveBudget,
   saveEstimate,
+  saveForecast,
   saveItem,
+  saveLibraryRate,
+  saveLocationCost,
+  saveMaterial,
   saveRate,
   approveVariation,
+  applyLibraryRate,
+  approveBill,
   approveBoq,
   addContractItem,
   exportReport,
@@ -36,12 +47,17 @@ import {
   saveProject,
   pickFolder,
   pickXlsxPath,
+  placeOrder,
+  projectKpi,
   projectReport,
+  recommendBill,
   reconcileBoq,
   readXlsx,
+  rejectBill,
   restoreBackup,
   setLocalServer,
   writeXlsx,
+  locationRollup,
   login,
   logout,
   MODULES,
@@ -596,8 +612,160 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
           <ContractPanel projectCode={selected} onError={onError} />
           <CostPanel projectCode={selected} onError={onError} />
           <ReportPanel projectCode={selected} onError={onError} />
+          <IntermediatePanel projectCode={selected} onError={onError} />
         </>
       )}
+    </>
+  );
+}
+
+function IntermediatePanel({ projectCode, onError }: { projectCode: string; onError: (message: string) => void }) {
+  const [note, setNote] = useState("");
+  const show = (text: string) => setNote(text);
+  const fail = (cause: unknown) => onError(text(cause));
+
+  return (
+    <>
+      <h2>Intermediate</h2>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveCommitment(projectCode, String(form.get("description") ?? ""), String(form.get("order") ?? ""), String(form.get("already") ?? ""))
+            .then((exposure) => show(`Open commitment ${exposure.openCommitment}. Actual plus commitment ${exposure.total}`))
+            .catch(fail);
+        }}
+      >
+        <label>Commitment<input name="description" /></label>
+        <label>Order amount<input name="order" /></label>
+        <label>Already certified<input name="already" /></label>
+        <div className="actions"><button type="submit">Save commitment</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void addQuoteLine(projectCode, String(form.get("vendor") ?? ""), String(form.get("description") ?? ""), String(form.get("amount") ?? ""))
+            .then(() => comparativeStatement(projectCode))
+            .then((statement) => show(`Selected ${statement.selectedVendor} at ${statement.selectedTotal}`))
+            .catch(fail);
+        }}
+      >
+        <label>Vendor<input name="vendor" /></label>
+        <label>Quote line<input name="description" /></label>
+        <label>Amount<input name="amount" /></label>
+        <div className="actions">
+          <button type="submit">Add quotation</button>
+          <button type="button" onClick={() => void placeOrder(projectCode).then((order) => show(`Order placed with ${order.selectedVendor} for ${order.selectedTotal}`)).catch(fail)}>Place order</button>
+        </div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveMaterial(projectCode, String(form.get("name") ?? ""), String(form.get("theoretical") ?? ""))
+            .then((materialId) => addMaterialMove(materialId, String(form.get("kind") ?? "issue"), String(form.get("quantity") ?? "")))
+            .then((check) => show(`Theoretical ${check.theoretical}. Actual ${check.actual}. Wastage ${check.wastage}`))
+            .catch(fail);
+        }}
+      >
+        <label>Material<input name="name" /></label>
+        <label>Theoretical<input name="theoretical" /></label>
+        <label>
+          Movement
+          <select name="kind" defaultValue="issue">
+            <option value="receipt">Receipt</option>
+            <option value="issue">Issue</option>
+          </select>
+        </label>
+        <label>Quantity<input name="quantity" /></label>
+        <div className="actions"><button type="submit">Record material</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveForecast(projectCode, String(form.get("remaining") ?? ""), String(form.get("cashFlow") ?? ""))
+            .then((forecast) => show(`Estimate at completion ${forecast.eac}. Cash flow ${forecast.cashFlow}`))
+            .catch(fail);
+        }}
+      >
+        <label>Cost to complete<input name="remaining" /></label>
+        <label>Cash flow<input name="cashFlow" /></label>
+        <div className="actions"><button type="submit">Save forecast</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveLocationCost(Number(form.get("locationId") ?? ""), String(form.get("amount") ?? ""))
+            .then(() => locationRollup(projectCode))
+            .then((rollup) => show(`Locations ${rollup.allocated}. Project ${rollup.projectTotal}`))
+            .catch(fail);
+        }}
+      >
+        <label>Location id<input name="locationId" /></label>
+        <label>Location cost<input name="amount" /></label>
+        <div className="actions"><button type="submit">Save location cost</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          const certificateId = Number(form.get("certificateId") ?? "");
+          const action = String(form.get("action") ?? "recommend");
+          const call = action === "approve" ? approveBill(certificateId) : action === "reject" ? rejectBill(certificateId) : action === "certify" ? certifyBill(certificateId) : recommendBill(certificateId);
+          void call.then(() => show(`Bill ${certificateId} ${action}`)).catch(fail);
+        }}
+      >
+        <label>Certificate id<input name="certificateId" /></label>
+        <label>
+          Action
+          <select name="action" defaultValue="recommend">
+            <option value="recommend">Recommend</option>
+            <option value="approve">Approve</option>
+            <option value="reject">Reject</option>
+            <option value="certify">Certify</option>
+          </select>
+        </label>
+        <div className="actions"><button type="submit">Update bill</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          const kind = String(form.get("kind") ?? "historical");
+          void saveLibraryRate(kind, String(form.get("code") ?? ""), String(form.get("rate") ?? ""))
+            .then((libraryId) => applyLibraryRate(Number(form.get("itemId") ?? ""), libraryId))
+            .then((amount) => show(`Applied rate. Item amount ${amount}`))
+            .catch(fail);
+        }}
+      >
+        <label>Item id<input name="itemId" /></label>
+        <label>
+          Rate library
+          <select name="kind" defaultValue="historical">
+            <option value="historical">Historical</option>
+            <option value="market">Market</option>
+          </select>
+        </label>
+        <label>Code<input name="code" /></label>
+        <label>Rate<input name="rate" /></label>
+        <div className="actions"><button type="submit">Apply rate</button></div>
+      </form>
+      <div className="actions">
+        <button
+          type="button"
+          onClick={() => {
+            void projectKpi(projectCode)
+              .then((kpi) => show(`Budget ${kpi.budget}. Actual ${kpi.actual}. Commitment ${kpi.commitment}. Forecast ${kpi.forecast}. Paid ${kpi.paid}`))
+              .catch(fail);
+          }}
+        >
+          Show dashboard
+        </button>
+      </div>
+      {note !== "" && <p className="muted">{note}</p>}
     </>
   );
 }

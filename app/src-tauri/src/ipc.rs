@@ -51,7 +51,8 @@ pub fn save_certificate(
             retention = excluded.retention,
             advance_recovery = excluded.advance_recovery,
             deductions = excluded.deductions,
-            net_payable = excluded.net_payable",
+            net_payable = excluded.net_payable,
+            status = 'draft'",
         params![
             contract_id,
             certificate_no,
@@ -92,6 +93,43 @@ fn amount(raw: &str) -> Result<f64, String> {
     raw.parse().map_err(|_| format!("{raw} is not a number."))
 }
 
+pub fn recommend_bill(conn: &Connection, certificate_id: i64) -> Result<(), String> {
+    move_bill(conn, certificate_id, &["draft"], "recommended")
+}
+
+pub fn approve_bill(conn: &Connection, certificate_id: i64) -> Result<(), String> {
+    move_bill(conn, certificate_id, &["recommended"], "approved")
+}
+
+pub fn reject_bill(conn: &Connection, certificate_id: i64) -> Result<(), String> {
+    move_bill(conn, certificate_id, &["draft", "recommended"], "rejected")
+}
+
+pub fn certify_bill(conn: &Connection, certificate_id: i64) -> Result<(), String> {
+    move_bill(conn, certificate_id, &["approved"], "certified")
+}
+
+pub fn certify_in_order(conn: &Connection, certificate_id: i64) -> Result<(), String> {
+    recommend_bill(conn, certificate_id)?;
+    approve_bill(conn, certificate_id)?;
+    certify_bill(conn, certificate_id)
+}
+
+fn move_bill(conn: &Connection, certificate_id: i64, allowed: &[&str], next: &str) -> Result<(), String> {
+    let status: String = conn
+        .query_row("SELECT status FROM ipc WHERE id = ?1", params![certificate_id], |row| row.get(0))
+        .map_err(|_| "Certificate was not found.".to_string())?;
+    if !allowed.iter().any(|item| *item == status) {
+        if next == "certified" {
+            return Err("An unapproved bill cannot be certified.".into());
+        }
+        return Err(format!("This bill is {status} and cannot become {next}."));
+    }
+    conn.execute("UPDATE ipc SET status = ?1 WHERE id = ?2", params![next, certificate_id])
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +149,18 @@ mod tests {
         assert_eq!(certificate.this_bill, "600");
         assert_eq!(certificate.retention, "60");
         assert_eq!(certificate.net_payable, "480");
+    }
+
+    #[test]
+    fn unapproved_bill_cannot_certify() {
+        let dir = tempfile::tempdir().unwrap();
+        let firm = create_firm(&dir.path().join("company.qsdb"), "0.1.0").unwrap();
+        save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let contractor = save_contractor(&firm.conn, "Alpha Builders").unwrap();
+        let contract = save_contract(&firm.conn, "TWR", contractor, "C-01", "Structure package").unwrap();
+        let certificate = save_certificate(&firm.conn, contract.id, 1, "0", "400", "0", "0", "0").unwrap();
+        let error = certify_bill(&firm.conn, certificate.id).unwrap_err();
+        assert!(error.contains("unapproved"));
+        certify_in_order(&firm.conn, certificate.id).unwrap();
     }
 }

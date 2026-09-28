@@ -29,7 +29,7 @@ fn position(conn: &Connection, project_id: i64, budget: f64) -> Result<CostPosit
             "SELECT ipc.this_bill
              FROM ipc
              JOIN contract ON contract.id = ipc.contract_id
-             WHERE contract.project_id = ?1",
+             WHERE contract.project_id = ?1 AND ipc.status = 'certified'",
         )
         .map_err(|err| err.to_string())?;
     let bills = stmt
@@ -45,7 +45,22 @@ fn position(conn: &Connection, project_id: i64, budget: f64) -> Result<CostPosit
     })
 }
 
-fn project_id(conn: &Connection, project_code: &str) -> Result<i64, String> {
+pub(crate) fn certified_amount(conn: &Connection, project_id: i64, column: &str) -> Result<f64, String> {
+    let sql = match column {
+        "this_bill" => "SELECT ipc.this_bill FROM ipc JOIN contract ON contract.id = ipc.contract_id WHERE contract.project_id = ?1 AND ipc.status = 'certified'",
+        "net_payable" => "SELECT ipc.net_payable FROM ipc JOIN contract ON contract.id = ipc.contract_id WHERE contract.project_id = ?1 AND ipc.status = 'certified'",
+        _ => return Err("Unknown certificate column.".into()),
+    };
+    let mut stmt = conn.prepare(sql).map_err(|err| err.to_string())?;
+    let bills = stmt
+        .query_map(params![project_id], |row| row.get::<_, String>(0))
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    bills.iter().map(|bill| number(bill)).sum()
+}
+
+pub(crate) fn project_id(conn: &Connection, project_code: &str) -> Result<i64, String> {
     conn.query_row(
         "SELECT id FROM project WHERE code = ?1",
         params![project_code.trim()],
@@ -78,7 +93,13 @@ mod tests {
         let contractor = save_contractor(&firm.conn, "Alpha Builders").unwrap();
         let contract = save_contract(&firm.conn, "TWR", contractor, "C-01", "Structure package").unwrap();
         save_certificate(&firm.conn, contract.id, 1, "0", "400", "0", "0", "0").unwrap();
-        save_certificate(&firm.conn, contract.id, 2, "400", "1000", "0", "0", "0").unwrap();
+        let second = save_certificate(&firm.conn, contract.id, 2, "400", "1000", "0", "0", "0").unwrap();
+        let first_id: i64 = firm
+            .conn
+            .query_row("SELECT id FROM ipc WHERE certificate_no = 1", [], |row| row.get(0))
+            .unwrap();
+        crate::ipc::certify_in_order(&firm.conn, first_id).unwrap();
+        crate::ipc::certify_in_order(&firm.conn, second.id).unwrap();
         let position = save_budget(&firm.conn, "TWR", "1500").unwrap();
         assert_eq!(position.actual, "1000");
         assert_eq!(position.variance, "500");

@@ -8,6 +8,7 @@ mod ipc;
 mod cost;
 mod variation;
 mod estimate;
+mod intermediate;
 mod rate;
 mod reconcile;
 mod report;
@@ -686,6 +687,177 @@ fn approve_boq(state: tauri::State<AppState>, project_code: String, version_no: 
 }
 
 #[tauri::command]
+fn save_commitment(
+    state: tauri::State<AppState>,
+    project_code: String,
+    description: String,
+    order_amount: String,
+    already_certified: String,
+) -> Result<intermediate::Exposure, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", Some(&project_code))?;
+        intermediate::save_commitment(&firm.conn, &project_code, &description, &order_amount, &already_certified)
+    })
+}
+
+#[tauri::command]
+fn add_quote_line(
+    state: tauri::State<AppState>,
+    project_code: String,
+    vendor: String,
+    description: String,
+    amount: String,
+) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "contract", Some(&project_code))?;
+        intermediate::add_quote_line(&firm.conn, &project_code, &vendor, &description, &amount)
+    })
+}
+
+#[tauri::command]
+fn comparative_statement(state: tauri::State<AppState>, project_code: String) -> Result<intermediate::Comparison, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "contract", Some(&project_code))?;
+        intermediate::comparative_statement(&firm.conn, &project_code)
+    })
+}
+
+#[tauri::command]
+fn place_order(state: tauri::State<AppState>, project_code: String) -> Result<intermediate::Comparison, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "approve", "contract", Some(&project_code))?;
+        intermediate::place_order(&firm.conn, &project_code)
+    })
+}
+
+#[tauri::command]
+fn save_material(
+    state: tauri::State<AppState>,
+    project_code: String,
+    name: String,
+    theoretical: String,
+) -> Result<i64, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", Some(&project_code))?;
+        intermediate::save_material(&firm.conn, &project_code, &name, &theoretical)
+    })
+}
+
+#[tauri::command]
+fn add_material_move(
+    state: tauri::State<AppState>,
+    material_id: i64,
+    kind: String,
+    quantity: String,
+) -> Result<intermediate::MaterialCheck, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", None)?;
+        intermediate::add_material_move(&firm.conn, material_id, &kind, &quantity)
+    })
+}
+
+#[tauri::command]
+fn save_forecast(
+    state: tauri::State<AppState>,
+    project_code: String,
+    remaining: String,
+    cash_flow: String,
+) -> Result<intermediate::Forecast, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", Some(&project_code))?;
+        intermediate::save_forecast(&firm.conn, &project_code, &remaining, &cash_flow)
+    })
+}
+
+#[tauri::command]
+fn save_location_cost(state: tauri::State<AppState>, location_id: i64, amount: String) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", None)?;
+        intermediate::save_location_cost(&firm.conn, location_id, &amount)
+    })
+}
+
+#[tauri::command]
+fn location_rollup(state: tauri::State<AppState>, project_code: String) -> Result<intermediate::LocationRollup, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "cost", Some(&project_code))?;
+        intermediate::location_rollup(&firm.conn, &project_code)
+    })
+}
+
+#[tauri::command]
+fn recommend_bill(state: tauri::State<AppState>, certificate_id: i64) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "recommend", "ipc", None)?;
+        ipc::recommend_bill(&firm.conn, certificate_id)
+    })
+}
+
+#[tauri::command]
+fn approve_bill(state: tauri::State<AppState>, certificate_id: i64) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "approve", "ipc", None)?;
+        ipc::approve_bill(&firm.conn, certificate_id)
+    })
+}
+
+#[tauri::command]
+fn reject_bill(state: tauri::State<AppState>, certificate_id: i64) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "reject", "ipc", None)?;
+        ipc::reject_bill(&firm.conn, certificate_id)
+    })
+}
+
+#[tauri::command]
+fn certify_bill(state: tauri::State<AppState>, certificate_id: i64) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "approve", "ipc", None)?;
+        ipc::certify_bill(&firm.conn, certificate_id)
+    })
+}
+
+#[tauri::command]
+fn save_library_rate(state: tauri::State<AppState>, kind: String, code: String, rate: String) -> Result<i64, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "rates", None)?;
+        intermediate::save_library_rate(&firm.conn, &kind, &code, &rate)
+    })
+}
+
+#[tauri::command]
+fn apply_library_rate(state: tauri::State<AppState>, item_id: i64, library_id: i64) -> Result<String, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "edit", "rates", None)?;
+        intermediate::apply_library_rate(&firm.conn, item_id, library_id)
+    })
+}
+
+#[tauri::command]
+fn project_kpi(state: tauri::State<AppState>, project_code: String) -> Result<intermediate::Kpi, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "cost", Some(&project_code))?;
+        intermediate::project_kpi(&firm.conn, &project_code)
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -781,7 +953,23 @@ pub fn run() {
             project_report,
             export_report,
             reconcile_boq,
-            approve_boq
+            approve_boq,
+            save_commitment,
+            add_quote_line,
+            comparative_statement,
+            place_order,
+            save_material,
+            add_material_move,
+            save_forecast,
+            save_location_cost,
+            location_rollup,
+            recommend_bill,
+            approve_bill,
+            reject_bill,
+            certify_bill,
+            save_library_rate,
+            apply_library_rate,
+            project_kpi
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");

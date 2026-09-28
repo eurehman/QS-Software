@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
-pub const SCHEMA_VERSION: i64 = 17;
+pub const SCHEMA_VERSION: i64 = 18;
 
 #[derive(Debug)]
 pub struct FirmFile {
@@ -32,6 +33,8 @@ pub fn open_firm(path: &Path, app_version: &str) -> Result<FirmFile, String> {
 
 fn open_connection(path: &Path, app_version: &str, fresh: bool) -> Result<FirmFile, String> {
     let conn = Connection::open(path).map_err(|err| err.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|err| err.to_string())?;
+    conn.execute_batch("PRAGMA journal_mode=WAL;").map_err(|err| err.to_string())?;
     let current = schema_version(&conn).map_err(|err| err.to_string())?;
     if !fresh && current > SCHEMA_VERSION {
         return Err("This firm file was written by a newer version of QS.".into());
@@ -373,6 +376,77 @@ fn migrate(conn: &Connection, from: i64) -> rusqlite::Result<()> {
             ",
         )?;
     }
+    if from < 18 {
+        conn.execute_batch(
+            "
+            ALTER TABLE ipc ADD COLUMN status TEXT NOT NULL DEFAULT 'draft';
+            UPDATE ipc SET status = 'certified';
+            CREATE TABLE commitment (
+              id INTEGER PRIMARY KEY,
+              project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+              description TEXT NOT NULL,
+              order_amount TEXT NOT NULL,
+              already_certified TEXT NOT NULL
+            );
+            CREATE TABLE requisition (
+              id INTEGER PRIMARY KEY,
+              project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+              code TEXT NOT NULL
+            );
+            CREATE TABLE rfq (
+              id INTEGER PRIMARY KEY,
+              requisition_id INTEGER NOT NULL REFERENCES requisition(id) ON DELETE CASCADE,
+              code TEXT NOT NULL
+            );
+            CREATE TABLE quotation (
+              id INTEGER PRIMARY KEY,
+              rfq_id INTEGER NOT NULL REFERENCES rfq(id) ON DELETE CASCADE,
+              vendor TEXT NOT NULL,
+              UNIQUE (rfq_id, vendor)
+            );
+            CREATE TABLE quotation_line (
+              id INTEGER PRIMARY KEY,
+              quotation_id INTEGER NOT NULL REFERENCES quotation(id) ON DELETE CASCADE,
+              description TEXT NOT NULL,
+              amount TEXT NOT NULL
+            );
+            CREATE TABLE purchase_order (
+              id INTEGER PRIMARY KEY,
+              quotation_id INTEGER NOT NULL REFERENCES quotation(id),
+              total TEXT NOT NULL
+            );
+            CREATE TABLE material_item (
+              id INTEGER PRIMARY KEY,
+              project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+              name TEXT NOT NULL,
+              theoretical TEXT NOT NULL
+            );
+            CREATE TABLE material_move (
+              id INTEGER PRIMARY KEY,
+              material_id INTEGER NOT NULL REFERENCES material_item(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL CHECK (kind IN ('receipt', 'issue')),
+              quantity TEXT NOT NULL
+            );
+            CREATE TABLE forecast (
+              project_id INTEGER PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
+              remaining TEXT NOT NULL,
+              cash_flow TEXT NOT NULL
+            );
+            CREATE TABLE location_cost (
+              location_id INTEGER PRIMARY KEY REFERENCES location_node(id) ON DELETE CASCADE,
+              amount TEXT NOT NULL
+            );
+            CREATE TABLE rate_library (
+              id INTEGER PRIMARY KEY,
+              kind TEXT NOT NULL CHECK (kind IN ('historical', 'market')),
+              code TEXT NOT NULL,
+              rate TEXT NOT NULL,
+              UNIQUE (kind, code)
+            );
+            UPDATE app_meta SET value = '18' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -386,7 +460,7 @@ mod tests {
         let path = dir.path().join("company.qsdb");
         let firm = create_firm(&path, "0.1.0").unwrap();
         assert!(path.exists());
-        assert_eq!(firm.schema_version, 17);
+        assert_eq!(firm.schema_version, 18);
         let stored: String = firm
             .conn
             .query_row(
@@ -395,9 +469,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, "17");
+        assert_eq!(stored, "18");
         let again = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(again.schema_version, 17);
+        assert_eq!(again.schema_version, 18);
     }
 
     #[test]
@@ -414,7 +488,7 @@ mod tests {
         .unwrap();
         drop(conn);
         let firm = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(firm.schema_version, 17);
+        assert_eq!(firm.schema_version, 18);
         let tables: i64 = firm
             .conn
             .query_row(
@@ -433,5 +507,24 @@ mod tests {
         create_firm(&path, "0.1.0").unwrap();
         let error = create_firm(&path, "0.1.0").unwrap_err();
         assert!(error.contains("already exists"));
+    }
+
+    #[test]
+    fn two_users_do_not_corrupt_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("company.qsdb");
+        let first = create_firm(&path, "0.1.0").unwrap();
+        let second = open_firm(&path, "0.1.0").unwrap();
+        crate::project::save_project(&first.conn, "AAA", "First user").unwrap();
+        crate::project::save_project(&second.conn, "BBB", "Second user").unwrap();
+        drop(first);
+        drop(second);
+        let again = open_firm(&path, "0.1.0").unwrap();
+        let count: i64 = again
+            .conn
+            .query_row("SELECT COUNT(*) FROM project", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(again.schema_version, SCHEMA_VERSION);
     }
 }

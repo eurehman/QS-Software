@@ -418,6 +418,75 @@ export async function createUser(username: string, displayName: string, password
   await invoke("create_user", { username, displayName, password });
 }
 
+export async function saveCommitment(
+  projectCode: string,
+  description: string,
+  orderAmount: string,
+  alreadyCertified: string,
+): Promise<{ actual: string; openCommitment: string; total: string }> {
+  return invoke("save_commitment", { projectCode, description, orderAmount, alreadyCertified });
+}
+
+export async function addQuoteLine(projectCode: string, vendor: string, description: string, amount: string): Promise<void> {
+  await invoke("add_quote_line", { projectCode, vendor, description, amount });
+}
+
+export async function comparativeStatement(projectCode: string): Promise<{ selectedVendor: string; selectedTotal: string }> {
+  return invoke("comparative_statement", { projectCode });
+}
+
+export async function placeOrder(projectCode: string): Promise<{ selectedVendor: string; selectedTotal: string }> {
+  return invoke("place_order", { projectCode });
+}
+
+export async function saveMaterial(projectCode: string, name: string, theoretical: string): Promise<number> {
+  return invoke("save_material", { projectCode, name, theoretical });
+}
+
+export async function addMaterialMove(materialId: number, kind: string, quantity: string): Promise<{ theoretical: string; actual: string; wastage: string }> {
+  return invoke("add_material_move", { materialId, kind, quantity });
+}
+
+export async function saveForecast(projectCode: string, remaining: string, cashFlow: string): Promise<{ eac: string; cashFlow: string }> {
+  return invoke("save_forecast", { projectCode, remaining, cashFlow });
+}
+
+export async function saveLocationCost(locationId: number, amount: string): Promise<void> {
+  await invoke("save_location_cost", { locationId, amount });
+}
+
+export async function locationRollup(projectCode: string): Promise<{ allocated: string; projectTotal: string }> {
+  return invoke("location_rollup", { projectCode });
+}
+
+export async function recommendBill(certificateId: number): Promise<void> {
+  await invoke("recommend_bill", { certificateId });
+}
+
+export async function approveBill(certificateId: number): Promise<void> {
+  await invoke("approve_bill", { certificateId });
+}
+
+export async function rejectBill(certificateId: number): Promise<void> {
+  await invoke("reject_bill", { certificateId });
+}
+
+export async function certifyBill(certificateId: number): Promise<void> {
+  await invoke("certify_bill", { certificateId });
+}
+
+export async function saveLibraryRate(kind: string, code: string, rate: string): Promise<number> {
+  return invoke("save_library_rate", { kind, code, rate });
+}
+
+export async function applyLibraryRate(itemId: number, libraryId: number): Promise<string> {
+  return invoke("apply_library_rate", { itemId, libraryId });
+}
+
+export async function projectKpi(projectCode: string): Promise<{ budget: string; actual: string; commitment: string; forecast: string; paid: string }> {
+  return invoke("project_kpi", { projectCode });
+}
+
 export async function pickFirmPath(mode: "open" | "save"): Promise<string | null> {
   if (!inTauri()) return null;
   const { open, save } = await import("@tauri-apps/plugin-dialog");
