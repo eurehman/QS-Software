@@ -304,6 +304,22 @@ export async function projectReport(projectCode: string): Promise<ReportLine[]> 
   return invoke("project_report", { projectCode });
 }
 
+export type Reconciliation = {
+  totalA: string;
+  totalB: string;
+  difference: string;
+  approved: boolean;
+  lines: { name: string; amountA: string; amountB: string; difference: string }[];
+};
+
+export async function reconcileBoq(projectCode: string, versionA: number, versionB: number): Promise<Reconciliation> {
+  return invoke("reconcile_boq", { projectCode, versionA, versionB });
+}
+
+export async function approveBoq(projectCode: string, versionNo: number): Promise<void> {
+  await invoke("approve_boq", { projectCode, versionNo });
+}
+
 export async function exportReport(projectCode: string, path: string): Promise<ReportLine[]> {
   return invoke("export_report", { projectCode, path });
 }

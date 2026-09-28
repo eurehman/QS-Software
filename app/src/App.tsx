@@ -29,6 +29,7 @@ import {
   saveItem,
   saveRate,
   approveVariation,
+  approveBoq,
   addContractItem,
   exportReport,
   addLocation,
@@ -36,6 +37,7 @@ import {
   pickFolder,
   pickXlsxPath,
   projectReport,
+  reconcileBoq,
   readXlsx,
   restoreBackup,
   setLocalServer,
@@ -58,6 +60,7 @@ import {
   type LocationNode,
   type MeasureLine,
   type Project,
+  type Reconciliation,
   type ReportLine,
   type WorkItem,
 } from "./api";
@@ -853,6 +856,7 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
   const [cbsId, setCbsId] = useState("");
   const [costId, setCostId] = useState("");
   const [unitId, setUnitId] = useState("");
+  const [comparison, setComparison] = useState<Reconciliation | null>(null);
 
   async function refresh(nextKind = kind) {
     const [shown, wbsRows, cbsRows, costRows, unitRows, itemRows] = await Promise.all([
@@ -1006,6 +1010,51 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
           <li key={item.id}>v{item.versionNo} {item.name} · qty {item.quantity || "—"} × {item.rate || "—"} = {item.amount} · {item.wbsCode} · {item.unitCode}</li>
         ))}
       </ul>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void reconcileBoq(projectCode, Number(form.get("versionA") ?? "1"), Number(form.get("versionB") ?? "2"))
+            .then(setComparison)
+            .catch((cause: unknown) => onError(text(cause)));
+        }}
+      >
+        <label>Version A<input name="versionA" defaultValue="1" /></label>
+        <label>Version B<input name="versionB" defaultValue="2" /></label>
+        <div className="actions">
+          <button type="submit">Compare versions</button>
+          {comparison !== null && !comparison.approved && (
+            <button
+              type="button"
+              onClick={(click) => {
+                const form = click.currentTarget.form;
+                if (form === null) return;
+                const versionB = Number(new FormData(form).get("versionB") ?? "2");
+                const versionA = Number(new FormData(form).get("versionA") ?? "1");
+                void approveBoq(projectCode, versionB)
+                  .then(() => reconcileBoq(projectCode, versionA, versionB))
+                  .then(setComparison)
+                  .catch((cause: unknown) => onError(text(cause)));
+              }}
+            >
+              Approve version B
+            </button>
+          )}
+        </div>
+      </form>
+      {comparison !== null && (
+        <>
+          <p className="muted">
+            Version A {comparison.totalA}. Version B {comparison.totalB}. Difference {comparison.difference}.
+            {comparison.approved ? " Version B is approved." : ""}
+          </p>
+          <ul className="users">
+            {comparison.lines.map((line) => (
+              <li key={line.name}>{line.name} {line.amountA} to {line.amountB} ({line.difference})</li>
+            ))}
+          </ul>
+        </>
+      )}
       {items.length > 0 && (
         <form
           onSubmit={(event) => {

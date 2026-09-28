@@ -9,6 +9,7 @@ mod cost;
 mod variation;
 mod estimate;
 mod rate;
+mod reconcile;
 mod report;
 mod project;
 mod xlsx;
@@ -662,6 +663,29 @@ fn export_report(state: tauri::State<AppState>, project_code: String, path: Stri
 }
 
 #[tauri::command]
+fn reconcile_boq(
+    state: tauri::State<AppState>,
+    project_code: String,
+    version_a: i64,
+    version_b: i64,
+) -> Result<reconcile::Reconciliation, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "boq", Some(&project_code))?;
+        reconcile::reconcile(&firm.conn, &project_code, version_a, version_b)
+    })
+}
+
+#[tauri::command]
+fn approve_boq(state: tauri::State<AppState>, project_code: String, version_no: i64) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "approve", "boq", Some(&project_code))?;
+        reconcile::approve_boq(&firm.conn, &project_code, version_no)
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -755,7 +779,9 @@ pub fn run() {
             approve_variation,
             save_budget,
             project_report,
-            export_report
+            export_report,
+            reconcile_boq,
+            approve_boq
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");
