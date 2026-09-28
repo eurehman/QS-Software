@@ -487,6 +487,34 @@ export async function projectKpi(projectCode: string): Promise<{ budget: string;
   return invoke("project_kpi", { projectCode });
 }
 
+export async function saveArea(projectCode: string, name: string, kind: "saleable" | "common", area: string): Promise<{ saleable: string; common: string; gfa: string; schedule: string; costPerSqft: string; margin: string }> {
+  return invoke("save_area", { projectCode, name, kind, area });
+}
+
+export async function saveSaleRate(projectCode: string, rate: string): Promise<{ saleable: string; common: string; gfa: string; schedule: string; costPerSqft: string; margin: string }> {
+  return invoke("save_sale_rate", { projectCode, rate });
+}
+
+export async function saveScenario(projectCode: string, name: string, budget: string): Promise<{ liveBudget: string; scenarioBudget: string }> {
+  return invoke("save_scenario", { projectCode, name, budget });
+}
+
+export async function closeAccount(projectCode: string): Promise<{ amount: string; certificateNo: number }> {
+  return invoke("close_account", { projectCode });
+}
+
+export async function projectTotals(): Promise<{ code: string; total: string }[]> {
+  return invoke("project_totals");
+}
+
+export async function setIntegration(key: string, enabled: boolean): Promise<boolean> {
+  return invoke("set_integration", { key, enabled });
+}
+
+export async function exportLocalWorkbook(projectCode: string, path: string): Promise<void> {
+  await invoke("export_local_workbook", { projectCode, path });
+}
+
 export async function pickFirmPath(mode: "open" | "save"): Promise<string | null> {
   if (!inTauri()) return null;
   const { open, save } = await import("@tauri-apps/plugin-dialog");

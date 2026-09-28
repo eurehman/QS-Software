@@ -11,6 +11,7 @@ import {
   createFirm,
   createUser,
   certifyBill,
+  closeAccount,
   comparativeStatement,
   currentFirm,
   assignRole,
@@ -29,6 +30,7 @@ import {
   saveCode,
   saveContract,
   saveContractor,
+  saveArea,
   saveBudget,
   saveEstimate,
   saveForecast,
@@ -42,6 +44,7 @@ import {
   approveBill,
   approveBoq,
   addContractItem,
+  exportLocalWorkbook,
   exportReport,
   addLocation,
   saveProject,
@@ -50,11 +53,13 @@ import {
   placeOrder,
   projectKpi,
   projectReport,
+  projectTotals,
   recommendBill,
   reconcileBoq,
   readXlsx,
   rejectBill,
   restoreBackup,
+  setIntegration,
   setLocalServer,
   writeXlsx,
   locationRollup,
@@ -67,6 +72,8 @@ import {
   saveRole,
   saveVariation,
   saveWorkOrder,
+  saveSaleRate,
+  saveScenario,
   saveSheet,
   type AccountStatus,
   type AuditEvent,
@@ -613,8 +620,84 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
           <CostPanel projectCode={selected} onError={onError} />
           <ReportPanel projectCode={selected} onError={onError} />
           <IntermediatePanel projectCode={selected} onError={onError} />
+          <AdvancedPanel projectCode={selected} onError={onError} />
         </>
       )}
+    </>
+  );
+}
+
+function AdvancedPanel({ projectCode, onError }: { projectCode: string; onError: (message: string) => void }) {
+  const [note, setNote] = useState("");
+  const fail = (cause: unknown) => onError(text(cause));
+
+  return (
+    <>
+      <h2>Advanced</h2>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          const kind = String(form.get("kind") ?? "saleable");
+          if (kind !== "saleable" && kind !== "common") return;
+          void saveArea(projectCode, String(form.get("name") ?? ""), kind, String(form.get("area") ?? ""))
+            .then((buildup) => setNote(`Saleable ${buildup.saleable}. GFA ${buildup.gfa}. Schedule ${buildup.schedule}`))
+            .catch(fail);
+        }}
+      >
+        <label>Area name<input name="name" /></label>
+        <label>
+          Kind
+          <select name="kind" defaultValue="saleable">
+            <option value="saleable">Saleable</option>
+            <option value="common">Common</option>
+          </select>
+        </label>
+        <label>Area<input name="area" /></label>
+        <div className="actions"><button type="submit">Add area</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveSaleRate(projectCode, String(form.get("rate") ?? ""))
+            .then((buildup) => setNote(`Cost per area ${buildup.costPerSqft}. Margin ${buildup.margin}`))
+            .catch(fail);
+        }}
+      >
+        <label>Sale rate per area<input name="rate" /></label>
+        <div className="actions"><button type="submit">Save sale rate</button></div>
+      </form>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          void saveScenario(projectCode, String(form.get("name") ?? ""), String(form.get("budget") ?? ""))
+            .then((scenario) => setNote(`Scenario ${scenario.scenarioBudget}. Live budget ${scenario.liveBudget}`))
+            .catch(fail);
+        }}
+      >
+        <label>Scenario<input name="name" /></label>
+        <label>Scenario budget<input name="budget" /></label>
+        <div className="actions"><button type="submit">Save scenario</button></div>
+      </form>
+      <div className="actions">
+        <button type="button" onClick={() => void closeAccount(projectCode).then((account) => setNote(`Final account ${account.amount} from certificate ${account.certificateNo}`)).catch(fail)}>Close final account</button>
+        <button type="button" onClick={() => void projectTotals().then((rows) => setNote(rows.map((row) => `${row.code} ${row.total}`).join(". "))).catch(fail)}>Compare projects</button>
+        <button type="button" onClick={() => void setIntegration("accounts", false).then((off) => setNote(off ? "Integrations are off. Core records stay available." : "An integration is enabled.")).catch(fail)}>Keep integrations off</button>
+        <button
+          type="button"
+          onClick={() => {
+            void pickXlsxPath("save").then((path) => {
+              if (!path) return;
+              void exportLocalWorkbook(projectCode, path).then(() => setNote("Workbook saved on this PC.")).catch(fail);
+            });
+          }}
+        >
+          Export workbook
+        </button>
+      </div>
+      {note !== "" && <p className="muted">{note}</p>}
     </>
   );
 }

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
-pub const SCHEMA_VERSION: i64 = 18;
+pub const SCHEMA_VERSION: i64 = 19;
 
 #[derive(Debug)]
 pub struct FirmFile {
@@ -447,6 +447,46 @@ fn migrate(conn: &Connection, from: i64) -> rusqlite::Result<()> {
             ",
         )?;
     }
+    if from < 19 {
+        conn.execute_batch(
+            "
+            CREATE TABLE development_area (
+              id INTEGER PRIMARY KEY,
+              project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+              name TEXT NOT NULL,
+              kind TEXT NOT NULL CHECK (kind IN ('saleable', 'common')),
+              area TEXT NOT NULL
+            );
+            CREATE TABLE development_sale (
+              project_id INTEGER PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
+              rate_per_area TEXT NOT NULL
+            );
+            CREATE TABLE scenario (
+              id INTEGER PRIMARY KEY,
+              project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+              name TEXT NOT NULL,
+              budget TEXT NOT NULL
+            );
+            CREATE TABLE final_account (
+              project_id INTEGER PRIMARY KEY REFERENCES project(id) ON DELETE CASCADE,
+              certificate_id INTEGER NOT NULL REFERENCES ipc(id),
+              amount TEXT NOT NULL
+            );
+            CREATE TABLE historical_cost (
+              id INTEGER PRIMARY KEY,
+              project_id INTEGER NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+              code TEXT NOT NULL,
+              rate TEXT NOT NULL,
+              amount TEXT NOT NULL
+            );
+            CREATE TABLE integration_setting (
+              key TEXT PRIMARY KEY,
+              enabled INTEGER NOT NULL
+            );
+            UPDATE app_meta SET value = '19' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -460,7 +500,7 @@ mod tests {
         let path = dir.path().join("company.qsdb");
         let firm = create_firm(&path, "0.1.0").unwrap();
         assert!(path.exists());
-        assert_eq!(firm.schema_version, 18);
+        assert_eq!(firm.schema_version, 19);
         let stored: String = firm
             .conn
             .query_row(
@@ -469,9 +509,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, "18");
+        assert_eq!(stored, "19");
         let again = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(again.schema_version, 18);
+        assert_eq!(again.schema_version, 19);
     }
 
     #[test]
@@ -488,7 +528,7 @@ mod tests {
         .unwrap();
         drop(conn);
         let firm = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(firm.schema_version, 18);
+        assert_eq!(firm.schema_version, 19);
         let tables: i64 = firm
             .conn
             .query_row(

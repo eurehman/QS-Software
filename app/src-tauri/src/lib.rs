@@ -15,6 +15,7 @@ mod report;
 mod project;
 mod xlsx;
 mod accounts;
+mod advanced;
 mod db;
 
 use std::fs;
@@ -858,6 +859,80 @@ fn project_kpi(state: tauri::State<AppState>, project_code: String) -> Result<in
 }
 
 #[tauri::command]
+fn save_area(
+    state: tauri::State<AppState>,
+    project_code: String,
+    name: String,
+    kind: String,
+    area: String,
+) -> Result<advanced::AreaBuildup, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "project", Some(&project_code))?;
+        advanced::save_area(&firm.conn, &project_code, &name, &kind, &area)
+    })
+}
+
+#[tauri::command]
+fn save_sale_rate(state: tauri::State<AppState>, project_code: String, rate: String) -> Result<advanced::AreaBuildup, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "project", Some(&project_code))?;
+        advanced::save_sale_rate(&firm.conn, &project_code, &rate)
+    })
+}
+
+#[tauri::command]
+fn save_scenario(
+    state: tauri::State<AppState>,
+    project_code: String,
+    name: String,
+    budget: String,
+) -> Result<advanced::ScenarioView, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "cost", Some(&project_code))?;
+        advanced::save_scenario(&firm.conn, &project_code, &name, &budget)
+    })
+}
+
+#[tauri::command]
+fn close_account(state: tauri::State<AppState>, project_code: String) -> Result<advanced::FinalAccount, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "approve", "cost", Some(&project_code))?;
+        advanced::close_account(&firm.conn, &project_code)
+    })
+}
+
+#[tauri::command]
+fn project_totals(state: tauri::State<AppState>) -> Result<Vec<advanced::ProjectTotal>, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "cost", None)?;
+        advanced::project_totals(&firm.conn)
+    })
+}
+
+#[tauri::command]
+fn set_integration(state: tauri::State<AppState>, key: String, enabled: bool) -> Result<bool, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "configure", "project", None)?;
+        advanced::set_integration(&firm.conn, &key, enabled)
+    })
+}
+
+#[tauri::command]
+fn export_local_workbook(state: tauri::State<AppState>, project_code: String, path: String) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "export", "reports", Some(&project_code))?;
+        advanced::export_local_workbook(&firm.conn, &project_code, std::path::Path::new(&path))
+    })
+}
+
+#[tauri::command]
 fn logout(state: tauri::State<AppState>) -> Result<(), String> {
     *state.session.lock().map_err(|err| err.to_string())? = None;
     Ok(())
@@ -969,7 +1044,14 @@ pub fn run() {
             certify_bill,
             save_library_rate,
             apply_library_rate,
-            project_kpi
+            project_kpi,
+            save_area,
+            save_sale_rate,
+            save_scenario,
+            close_account,
+            project_totals,
+            set_integration,
+            export_local_workbook
         ])
         .run(tauri::generate_context!())
         .expect("error while running QS");
