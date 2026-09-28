@@ -1,0 +1,14 @@
+---
+description: Update the QS progress canvases after each completed development step
+alwaysApply: true
+---
+
+# Update canvases after each development step
+
+After a QS work item is implemented and its test has passed, update all three canvases in the same turn before reporting the result:
+
+- C:\Users\mrlaptop\.cursor\projects\d-QS-Software\canvases\qs-development.canvas.tsx
+- C:\Users\mrlaptop\.cursor\projects\d-QS-Software\canvases\targeted-works.canvas.tsx
+- C:\Users\mrlaptop\.cursor\projects\d-QS-Software\canvases\progress-done.canvas.tsx
+
+Keep the three files identical. Change the work-register status, add the progress row, refresh the charts and the "Last updated" line, then copy that file over the other two. Do not mark a work item complete in a canvas before its test passes. Do not remove completed rows.
