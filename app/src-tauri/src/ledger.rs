@@ -59,6 +59,53 @@ pub fn set_measured(conn: &Connection, item_id: i64, quantity: &str) -> Result<(
     rollup_parents(conn, item_id)
 }
 
+pub fn post_balance(conn: &Connection, item_id: i64, balance: &str, quantity: &str, username: &str) -> Result<QuantityLedger, String> {
+    let column = balance_column(balance)?;
+    let posted = number_text(quantity)?;
+    let children: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM work_item WHERE parent_id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    if children > 0 {
+        return Err("A heading balance comes from its children.".into());
+    }
+    let old: String = conn
+        .query_row(
+            &format!("SELECT {column} FROM quantity_ledger WHERE item_id = ?1"),
+            params![item_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "That bill item has no quantity ledger.".to_string())?;
+    conn.execute(
+        &format!("UPDATE quantity_ledger SET {column} = ?1 WHERE item_id = ?2"),
+        params![posted, item_id],
+    )
+    .map_err(|err| err.to_string())?;
+    rollup_parents(conn, item_id)?;
+    crate::audit::record(
+        conn,
+        username,
+        "edit",
+        &format!("bill:{item_id}:{}", balance.trim().to_lowercase()),
+        &old,
+        &posted,
+    )?;
+    read(conn, item_id)
+}
+
+fn balance_column(balance: &str) -> Result<&'static str, String> {
+    let balance = balance.trim().to_lowercase();
+    match balance.as_str() {
+        "executed" => Ok("executed_qty"),
+        "certified" => Ok("certified_qty"),
+        "billed" => Ok("billed_qty"),
+        _ => Err("Post executed, certified, or billed.".into()),
+    }
+}
+
 pub fn read(conn: &Connection, item_id: i64) -> Result<QuantityLedger, String> {
     let row = raw(conn, item_id)?.ok_or_else(|| "That bill item has no quantity ledger.".to_string())?;
     Ok(with_remaining(item_id, row))
@@ -365,5 +412,79 @@ mod tests {
         assert!(row.contains(&"m3".to_string()));
         let project = crate::xlsx::read_sheet(&path, "Project").unwrap();
         assert_eq!(project[1][0], "TWR");
+    }
+
+    #[test]
+    fn posted_quantities_reconcile() {
+        let dir = tempfile::tempdir().unwrap();
+        let firm = create_firm(&dir.path().join("company.qsdb"), "0.1.0").unwrap();
+        save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let wbs = save_code(&firm.conn, "wbs", "03.10", "Concrete").unwrap();
+        let cbs = save_code(&firm.conn, "cbs", "STR", "Structure").unwrap();
+        let cost = save_code(&firm.conn, "cost", "C310", "In-situ concrete").unwrap();
+        let unit = save_code(&firm.conn, "unit", "m3", "Cubic metre").unwrap();
+        let heading = save_item(
+            &firm.conn, "TWR", None, 1, "Structure", "", "", wbs.id, cbs.id, cost.id, unit.id,
+        )
+        .unwrap();
+        let item = save_item(
+            &firm.conn, "TWR", Some(heading.id), 1, "Concrete — Structural", "100", "1",
+            wbs.id, cbs.id, cost.id, unit.id,
+        )
+        .unwrap();
+
+        let opening = read(&firm.conn, item.id).unwrap();
+        assert_eq!(opening.original_qty, "100");
+        assert_eq!(opening.executed_qty, "0");
+        assert_eq!(opening.certified_qty, "0");
+        assert_eq!(opening.billed_qty, "0");
+        assert_eq!(opening.remaining_qty, "100");
+
+        let executed = post_balance(&firm.conn, item.id, "executed", "40", "qs").unwrap();
+        assert_eq!(executed.original_qty, "100");
+        assert_eq!(executed.executed_qty, "40");
+        assert_eq!(executed.measured_qty, "0");
+        assert_eq!(executed.certified_qty, "0");
+        assert_eq!(executed.billed_qty, "0");
+        assert_eq!(executed.remaining_qty, "100");
+
+        let certified = post_balance(&firm.conn, item.id, "certified", "35", "qs").unwrap();
+        assert_eq!(certified.original_qty, "100");
+        assert_eq!(certified.executed_qty, "40");
+        assert_eq!(certified.certified_qty, "35");
+        assert_eq!(certified.remaining_qty, "65");
+
+        let billed = post_balance(&firm.conn, item.id, "billed", "35", "qs").unwrap();
+        assert_eq!(billed.billed_qty, "35");
+        assert_eq!(billed.certified_qty, "35");
+        assert_eq!(billed.remaining_qty, "65");
+        assert_eq!(billed.original_qty, "100");
+
+        let more = post_balance(&firm.conn, item.id, "billed", "40", "qs").unwrap();
+        assert_eq!(more.billed_qty, "40");
+        assert_eq!(more.certified_qty, "35");
+        assert_eq!(more.remaining_qty, "60");
+        assert_eq!(more.contract_qty, "100");
+
+        let parent = read(&firm.conn, heading.id).unwrap();
+        assert_eq!(parent.original_qty, "100");
+        assert_eq!(parent.executed_qty, "40");
+        assert_eq!(parent.certified_qty, "35");
+        assert_eq!(parent.billed_qty, "40");
+        assert_eq!(parent.remaining_qty, "60");
+
+        let heading_error = post_balance(&firm.conn, heading.id, "executed", "1", "qs").unwrap_err();
+        assert!(heading_error.contains("children"));
+        let unknown = post_balance(&firm.conn, item.id, "paid", "1", "qs").unwrap_err();
+        assert!(unknown.contains("executed"));
+
+        let edit = crate::audit::list_events(&firm.conn)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.target == format!("bill:{}:executed", item.id))
+            .unwrap();
+        assert_eq!(edit.username, "qs");
+        assert_eq!(edit.old_value, "0");
+        assert_eq!(edit.new_value, "40");
     }
 }

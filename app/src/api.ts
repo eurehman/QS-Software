@@ -217,6 +217,10 @@ export async function itemLedger(itemId: number): Promise<QuantityLedger> {
   return invoke<QuantityLedger>("item_ledger", { itemId });
 }
 
+export async function postQuantity(itemId: number, balance: string, quantity: string): Promise<QuantityLedger> {
+  return invoke<QuantityLedger>("post_quantity", { itemId, balance, quantity });
+}
+
 export async function listMeasures(itemId: number): Promise<MeasureLine[]> {
   return invoke<MeasureLine[]>("list_measures", { itemId });
 }

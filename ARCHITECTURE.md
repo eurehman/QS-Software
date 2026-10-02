@@ -42,7 +42,7 @@ One firm file stands in for the company. There is no company row.
 | location_node | Parent/child tree. Kind is development, building, tower, floor, unit, zone, or custom. The label stays free. |
 | code_entry | Kinds: wbs, cbs, cost, unit, work, discipline, package |
 | work_item | Bill line: name, four code references, parent, version, quantity, rate, amount |
-| quantity_ledger | One balance row per bill item: original, revised, planned, contract, executed, measured, certified, billed, paid, forecast, final. Remaining is calculated. |
+| quantity_ledger | One balance row per bill item. A leaf can post executed, certified, and billed. A heading sums its children. Remaining is original minus the larger of certified and billed. |
 | measure_line | Times, length, width, height against a work item |
 | rate_buildup | One composite-rate row per work item |
 | estimate | Kind boq or area, one total |

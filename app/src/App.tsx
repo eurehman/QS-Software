@@ -20,6 +20,7 @@ import {
   listCodes,
   listItems,
   itemLedger,
+  postQuantity,
   listMeasures,
   addMeasure,
   addMaterialMove,
@@ -1434,6 +1435,31 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
             <li>Final {ledger.finalQty}</li>
             <li>Remaining {ledger.remainingQty}</li>
           </ul>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const form = new FormData(event.currentTarget);
+              void postQuantity(ledger.itemId, String(form.get("balance") ?? ""), String(form.get("quantity") ?? ""))
+                .then(setLedger)
+                .catch((cause: unknown) => onError(text(cause)));
+            }}
+          >
+            <label>
+              Balance
+              <select name="balance" defaultValue="executed" aria-label="Ledger balance">
+                <option value="executed">Executed</option>
+                <option value="certified">Certified</option>
+                <option value="billed">Billed</option>
+              </select>
+            </label>
+            <label>
+              Quantity
+              <input name="quantity" aria-label="Posted quantity" />
+            </label>
+            <div className="actions">
+              <button type="submit">Post quantity</button>
+            </div>
+          </form>
         </>
       )}
       <form

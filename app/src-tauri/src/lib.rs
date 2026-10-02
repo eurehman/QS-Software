@@ -447,6 +447,30 @@ fn item_ledger(state: tauri::State<AppState>, item_id: i64) -> Result<ledger::Qu
 }
 
 #[tauri::command]
+fn post_quantity(
+    state: tauri::State<AppState>,
+    item_id: i64,
+    balance: String,
+    quantity: String,
+) -> Result<ledger::QuantityLedger, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        let project_code: String = firm
+            .conn
+            .query_row(
+                "SELECT project.code FROM work_item
+                 JOIN project ON project.id = work_item.project_id
+                 WHERE work_item.id = ?1",
+                rusqlite::params![item_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "That bill item was not found.".to_string())?;
+        access::require_access(&firm.conn, &account, "edit", "project", Some(&project_code))?;
+        ledger::post_balance(&firm.conn, item_id, &balance, &quantity, &account.username)
+    })
+}
+
+#[tauri::command]
 fn list_items(state: tauri::State<AppState>, project_code: String) -> Result<Vec<codes::WorkItem>, String> {
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
@@ -1101,6 +1125,7 @@ pub fn run() {
             save_code,
             list_items,
             item_ledger,
+            post_quantity,
             save_item,
             revise_item_quantity,
             list_measures,
