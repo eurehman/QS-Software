@@ -26,6 +26,8 @@ import {
   addQuoteLine,
   listLocations,
   listProjects,
+  loadCompany,
+  saveCompany,
   saveCertificate,
   saveCommitment,
   saveCode,
@@ -503,6 +505,7 @@ export function App() {
 }
 
 function ProjectScreen({ onError }: { onError: (message: string) => void }) {
+  const [companyName, setCompanyName] = useState("");
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState("");
   const [nodes, setNodes] = useState<LocationNode[]>([]);
@@ -523,6 +526,9 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
 
   useEffect(() => {
     void refreshProjects().catch((cause: unknown) => onError(text(cause)));
+    void loadCompany()
+      .then((company) => setCompanyName(company.name))
+      .catch((cause: unknown) => onError(text(cause)));
   }, []);
 
   function depth(node: LocationNode): number {
@@ -538,7 +544,23 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
   return (
     <>
       <h1>Projects</h1>
-      <p className="muted">Each project can use its own location labels and depth. A location can be a development, building, tower, floor, unit, zone, or a custom label.</p>
+      <p className="muted">One firm file holds one company. Each project under that company can use its own location labels and depth.</p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveCompany(companyName)
+            .then((company) => setCompanyName(company.name))
+            .catch((cause: unknown) => onError(text(cause)));
+        }}
+      >
+        <label>
+          Company
+          <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} />
+        </label>
+        <div className="actions">
+          <button type="submit">Save company</button>
+        </div>
+      </form>
       <form
         onSubmit={(event) => {
           event.preventDefault();

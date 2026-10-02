@@ -3,7 +3,7 @@
 Date: 29 September 2026
 Controlling specification: `QS_Cursor_Master_Quantity_Control_ERP_Prompt.md`
 Product version: 0.1.0
-Firm-file schema: 23
+Firm-file schema: 24
 Repository: https://github.com/eurehman/QS-Software
 
 This document is the Phase 0 architecture record. It does not declare the ERP complete.
@@ -26,7 +26,7 @@ The window has three screens:
 
 An installer has not been built. The window the user opens is the development program.
 
-## Current data model (schema 19)
+## Current data model (schema 24)
 
 One firm file stands in for the company. There is no company row.
 
@@ -37,6 +37,7 @@ One firm file stands in for the company. There is no company row.
 | sheet_cell | The generic 8×40 sheet, not the bill |
 | backup_record | History of sheet backups |
 | audit_event | Sheet cells, and create or edit of a project, code, or bill quantity. User, time, old value, and new value. |
+| company | One company per firm file. Projects point at that row. |
 | project | Code and name |
 | location_node | Parent/child tree. Kind is development, building, tower, floor, unit, zone, or custom. The label stays free. |
 | code_entry | Kinds: wbs, cbs, cost, unit, work, discipline, package |

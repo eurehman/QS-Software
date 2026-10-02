@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
-pub const SCHEMA_VERSION: i64 = 23;
+pub const SCHEMA_VERSION: i64 = 24;
 
 #[derive(Debug)]
 pub struct FirmFile {
@@ -561,6 +561,19 @@ fn migrate(conn: &Connection, from: i64) -> rusqlite::Result<()> {
             ",
         )?;
     }
+    if from < 24 {
+        conn.execute_batch(
+            "
+            CREATE TABLE company (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              name TEXT NOT NULL
+            );
+            INSERT INTO company (id, name) VALUES (1, 'Company');
+            ALTER TABLE project ADD COLUMN company_id INTEGER NOT NULL DEFAULT 1 REFERENCES company(id);
+            UPDATE app_meta SET value = '24' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -574,7 +587,7 @@ mod tests {
         let path = dir.path().join("company.qsdb");
         let firm = create_firm(&path, "0.1.0").unwrap();
         assert!(path.exists());
-        assert_eq!(firm.schema_version, 23);
+        assert_eq!(firm.schema_version, 24);
         let stored: String = firm
             .conn
             .query_row(
@@ -583,9 +596,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, "23");
+        assert_eq!(stored, "24");
         let again = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(again.schema_version, 23);
+        assert_eq!(again.schema_version, 24);
     }
 
     #[test]
@@ -602,7 +615,7 @@ mod tests {
         .unwrap();
         drop(conn);
         let firm = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(firm.schema_version, 23);
+        assert_eq!(firm.schema_version, 24);
         let tables: i64 = firm
             .conn
             .query_row(

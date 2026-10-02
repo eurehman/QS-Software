@@ -137,6 +137,7 @@ export async function listAudit(): Promise<AuditEvent[]> {
   return invoke<AuditEvent[]>("list_audit");
 }
 
+export type Company = { id: number; name: string };
 export type Project = { id: number; code: string; name: string };
 export type LocationNode = {
   id: number;
@@ -145,6 +146,14 @@ export type LocationNode = {
   label: string;
   name: string;
 };
+
+export async function loadCompany(): Promise<Company> {
+  return invoke<Company>("load_company");
+}
+
+export async function saveCompany(name: string): Promise<Company> {
+  return invoke<Company>("save_company", { name });
+}
 
 export async function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");

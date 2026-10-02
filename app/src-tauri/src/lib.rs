@@ -344,6 +344,24 @@ fn list_audit(state: tauri::State<AppState>) -> Result<Vec<audit::AuditEvent>, S
 }
 
 #[tauri::command]
+fn load_company(state: tauri::State<AppState>) -> Result<project::Company, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "view", "project", None)?;
+        project::load_company(&firm.conn)
+    })
+}
+
+#[tauri::command]
+fn save_company(state: tauri::State<AppState>, name: String) -> Result<project::Company, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "edit", "project", None)?;
+        project::save_company(&firm.conn, &name, &account.username)
+    })
+}
+
+#[tauri::command]
 fn list_projects(state: tauri::State<AppState>) -> Result<Vec<project::Project>, String> {
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
@@ -1073,6 +1091,8 @@ pub fn run() {
             create_backup,
             restore_backup,
             list_audit,
+            load_company,
+            save_company,
             list_projects,
             save_project,
             list_locations,

@@ -119,7 +119,7 @@ pub fn export_core(conn: &Connection, project_code: &str, path: &std::path::Path
     crate::xlsx::write_sheets(
         path,
         &[
-            ("Project", vec![vec!["Code".into(), "Name".into()], vec![code, name]]),
+            ("Project", vec![vec!["Code".into(), "Name".into(), "Company".into()], vec![code, name, crate::project::load_company(conn)?.name]]),
             ("Codes", code_rows),
             ("Bill", bill_rows),
         ],

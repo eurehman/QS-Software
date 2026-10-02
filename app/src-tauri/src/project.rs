@@ -3,6 +3,13 @@ use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Company {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: i64,
     pub code: String,
@@ -50,6 +57,28 @@ pub fn save_project_as(conn: &Connection, code: &str, name: &str, username: &str
     let action = if previous.is_none() { "create" } else { "edit" };
     crate::audit::record(conn, username, action, &format!("project:{code}"), &old, name)?;
     load_project(conn, code)
+}
+
+pub fn load_company(conn: &Connection) -> Result<Company, String> {
+    conn.query_row("SELECT id, name FROM company WHERE id = 1", [], |row| {
+        Ok(Company {
+            id: row.get(0)?,
+            name: row.get(1)?,
+        })
+    })
+    .map_err(|_| "The company record was not found.".to_string())
+}
+
+pub fn save_company(conn: &Connection, name: &str, username: &str) -> Result<Company, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Enter a company name.".into());
+    }
+    let current = load_company(conn)?;
+    conn.execute("UPDATE company SET name = ?1 WHERE id = 1", params![name])
+        .map_err(|err| err.to_string())?;
+    crate::audit::record(conn, username, "edit", "company:1", &current.name, name)?;
+    load_company(conn)
 }
 
 pub fn list_projects(conn: &Connection) -> Result<Vec<Project>, String> {
@@ -221,5 +250,46 @@ mod tests {
         assert_eq!(nodes[2].name, "301");
         let error = add_location(&again.conn, "HOME", None, "wing", "Wing", "West").unwrap_err();
         assert!(error.contains("custom"));
+    }
+
+    #[test]
+    fn company_reloads_with_its_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("company.qsdb");
+        let firm = create_firm(&path, "0.1.0").unwrap();
+        assert_eq!(load_company(&firm.conn).unwrap().name, "Company");
+        save_company(&firm.conn, "Harbour Developments", "qs").unwrap();
+        let project = save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let company_id: i64 = firm
+            .conn
+            .query_row("SELECT company_id FROM project WHERE id = ?1", params![project.id], |row| row.get(0))
+            .unwrap();
+        assert_eq!(company_id, 1);
+        let count: i64 = firm.conn.query_row("SELECT COUNT(*) FROM company", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 1);
+        drop(firm);
+        let again = crate::db::open_firm(&path, "0.1.0").unwrap();
+        assert_eq!(load_company(&again.conn).unwrap().name, "Harbour Developments");
+        let linked: i64 = again
+            .conn
+            .query_row("SELECT company_id FROM project WHERE code = 'TWR'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(linked, 1);
+        let edit = crate::audit::list_events(&again.conn)
+            .unwrap()
+            .into_iter()
+            .find(|event| event.target == "company:1" && event.action == "edit")
+            .unwrap();
+        assert_eq!(edit.username, "qs");
+        assert_eq!(edit.old_value, "Company");
+        assert_eq!(edit.new_value, "Harbour Developments");
+        assert!(!edit.created_at.is_empty());
+        let error = save_company(&again.conn, "  ", "qs").unwrap_err();
+        assert!(error.contains("name"));
+        let workbook = dir.path().join("core.xlsx");
+        crate::ledger::export_core(&again.conn, "TWR", &workbook).unwrap();
+        let sheet = crate::xlsx::read_sheet(&workbook, "Project").unwrap();
+        assert_eq!(sheet[1][0], "TWR");
+        assert_eq!(sheet[1][2], "Harbour Developments");
     }
 }
