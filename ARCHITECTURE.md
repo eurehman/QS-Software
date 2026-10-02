@@ -3,7 +3,7 @@
 Date: 29 September 2026
 Controlling specification: `QS_Cursor_Master_Quantity_Control_ERP_Prompt.md`
 Product version: 0.1.0
-Firm-file schema: 19
+Firm-file schema: 23
 Repository: https://github.com/eurehman/QS-Software
 
 This document is the Phase 0 architecture record. It does not declare the ERP complete.
@@ -38,14 +38,15 @@ One firm file stands in for the company. There is no company row.
 | backup_record | History of sheet backups |
 | audit_event | Sheet cell create, edit, and delete only |
 | project | Code and name |
-| location_node | Free parent/child tree. The label is text, not a fixed type |
-| code_entry | Kinds: wbs, cbs, cost, unit |
+| location_node | Parent/child tree. Kind is development, building, tower, floor, unit, zone, or custom. The label stays free. |
+| code_entry | Kinds: wbs, cbs, cost, unit, work, discipline, package |
 | work_item | Bill line: name, four code references, parent, version, quantity, rate, amount |
+| quantity_ledger | One balance row per bill item: original, revised, planned, contract, executed, measured, certified, billed, paid, forecast, final. Remaining is calculated. |
 | measure_line | Times, length, width, height against a work item |
 | rate_buildup | One composite-rate row per work item |
 | estimate | Kind boq or area, one total |
 | contractor, contract, work_order | Contractor, contract, and work order |
-| contract_item | A second bill. Description, quantity, rate, amount. It does not reference work_item |
+| contract_item | Contract bill line. It may point at a work_item. Older lines keep a free description. |
 | ipc | Certificate money columns and status draft, recommended, approved, rejected, or certified |
 | variation | Add, omit, or substitute as one signed amount. Draft or approved |
 | cost_budget | One budget amount per project |

@@ -96,6 +96,74 @@ pub fn add_contract_item(
     load_contract(conn, &project_code, &code)
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractLine {
+    pub item_id: Option<i64>,
+    pub description: String,
+    pub quantity: String,
+    pub rate: String,
+    pub amount: String,
+}
+
+pub fn link_contract_item(conn: &Connection, contract_id: i64, item_id: i64) -> Result<ContractView, String> {
+    let contract_project: i64 = conn
+        .query_row("SELECT project_id FROM contract WHERE id = ?1", params![contract_id], |row| row.get(0))
+        .map_err(|_| "That contract was not found.".to_string())?;
+    let (item_project, name, quantity, rate): (i64, String, String, String) = conn
+        .query_row(
+            "SELECT project_id, name, quantity, rate FROM work_item WHERE id = ?1",
+            params![item_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| "That bill item was not found.".to_string())?;
+    if item_project != contract_project {
+        return Err("The bill item belongs to another project.".into());
+    }
+    if quantity.trim().is_empty() || rate.trim().is_empty() {
+        return Err("Enter a quantity and rate on the bill item before adding it to the contract.".into());
+    }
+    let amount = format_number(number(&quantity)? * number(&rate)?);
+    conn.execute(
+        "INSERT INTO contract_item (contract_id, description, quantity, rate, amount, item_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![contract_id, name, quantity.trim(), rate.trim(), amount, item_id],
+    )
+    .map_err(|err| err.to_string())?;
+    refresh_value(conn, contract_id)?;
+    let (project_code, code): (String, String) = conn
+        .query_row(
+            "SELECT project.code, contract.code
+             FROM contract JOIN project ON project.id = contract.project_id
+             WHERE contract.id = ?1",
+            params![contract_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|err| err.to_string())?;
+    load_contract(conn, &project_code, &code)
+}
+
+pub fn list_contract_lines(conn: &Connection, contract_id: i64) -> Result<Vec<ContractLine>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT item_id, description, quantity, rate, amount
+             FROM contract_item WHERE contract_id = ?1 ORDER BY id",
+        )
+        .map_err(|err| err.to_string())?;
+    let rows = stmt
+        .query_map(params![contract_id], |row| {
+            Ok(ContractLine {
+                item_id: row.get(0)?,
+                description: row.get(1)?,
+                quantity: row.get(2)?,
+                rate: row.get(3)?,
+                amount: row.get(4)?,
+            })
+        })
+        .map_err(|err| err.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|err| err.to_string())
+}
+
 fn refresh_value(conn: &Connection, contract_id: i64) -> Result<(), String> {
     let mut stmt = conn
         .prepare("SELECT amount FROM contract_item WHERE contract_id = ?1")
@@ -169,5 +237,37 @@ mod tests {
         add_contract_item(&firm.conn, contract.id, "Slab", "2.5", "10").unwrap();
         let updated = add_contract_item(&firm.conn, contract.id, "Beam", "1", "20").unwrap();
         assert_eq!(updated.value, "45");
+    }
+
+    #[test]
+    fn contract_line_uses_the_bill_item() {
+        use crate::codes::{list_items, save_code, save_item};
+
+        let dir = tempfile::tempdir().unwrap();
+        let firm = create_firm(&dir.path().join("company.qsdb"), "0.1.0").unwrap();
+        save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let wbs = save_code(&firm.conn, "wbs", "03.10", "Concrete").unwrap();
+        let cbs = save_code(&firm.conn, "cbs", "STR", "Structure").unwrap();
+        let cost = save_code(&firm.conn, "cost", "C310", "In-situ concrete").unwrap();
+        let unit = save_code(&firm.conn, "unit", "m3", "Cubic metre").unwrap();
+        let item = save_item(
+            &firm.conn, "TWR", None, 1, "Concrete — Structural", "100", "1",
+            wbs.id, cbs.id, cost.id, unit.id,
+        )
+        .unwrap();
+        let contractor = save_contractor(&firm.conn, "Alpha Builders").unwrap();
+        let contract = save_contract(&firm.conn, "TWR", contractor, "C-01", "Structure package").unwrap();
+        let updated = link_contract_item(&firm.conn, contract.id, item.id).unwrap();
+        assert_eq!(updated.value, "100");
+        let lines = list_contract_lines(&firm.conn, contract.id).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].item_id, Some(item.id));
+        let bill = list_items(&firm.conn, "TWR").unwrap();
+        assert_eq!(bill.iter().find(|row| row.id == item.id).unwrap().id, lines[0].item_id.unwrap());
+
+        save_project(&firm.conn, "OTHER", "Other site").unwrap();
+        let other = save_contract(&firm.conn, "OTHER", contractor, "C-02", "Other package").unwrap();
+        let error = link_contract_item(&firm.conn, other.id, item.id).unwrap_err();
+        assert!(error.contains("another project"));
     }
 }

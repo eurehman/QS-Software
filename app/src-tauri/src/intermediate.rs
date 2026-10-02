@@ -534,9 +534,9 @@ mod tests {
         let contract = save_contract(&firm.conn, "TWR", contractor, "C-01", "Structure package").unwrap();
         let certificate = save_certificate(&firm.conn, contract.id, 1, "0", "1000", "0", "0", "0").unwrap();
         certify_in_order(&firm.conn, certificate.id).unwrap();
-        let tower = add_location(&firm.conn, "TWR", None, "Tower", "A").unwrap();
-        let floor = add_location(&firm.conn, "TWR", Some(tower.id), "Floor", "1").unwrap();
-        let unit = add_location(&firm.conn, "TWR", Some(floor.id), "Unit", "1").unwrap();
+        let tower = add_location(&firm.conn, "TWR", None, "", "Tower", "A").unwrap();
+        let floor = add_location(&firm.conn, "TWR", Some(tower.id), "", "Floor", "1").unwrap();
+        let unit = add_location(&firm.conn, "TWR", Some(floor.id), "", "Unit", "1").unwrap();
         save_location_cost(&firm.conn, tower.id, "600").unwrap();
         save_location_cost(&firm.conn, floor.id, "250").unwrap();
         save_location_cost(&firm.conn, unit.id, "150").unwrap();

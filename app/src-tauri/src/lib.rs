@@ -2,6 +2,7 @@ mod access;
 mod audit;
 mod backup;
 mod codes;
+mod ledger;
 mod measure;
 mod contract;
 mod ipc;
@@ -374,13 +375,14 @@ fn add_location(
     state: tauri::State<AppState>,
     project_code: String,
     parent_id: Option<i64>,
+    kind: String,
     label: String,
     name: String,
 ) -> Result<project::LocationNode, String> {
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
         access::require_access(&firm.conn, &account, "create", "project", Some(&project_code))?;
-        project::add_location(&firm.conn, &project_code, parent_id, &label, &name)
+        project::add_location(&firm.conn, &project_code, parent_id, &kind, &label, &name)
     })
 }
 
@@ -408,6 +410,25 @@ fn save_code(
 }
 
 #[tauri::command]
+fn item_ledger(state: tauri::State<AppState>, item_id: i64) -> Result<ledger::QuantityLedger, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        let project_code: String = firm
+            .conn
+            .query_row(
+                "SELECT project.code FROM work_item
+                 JOIN project ON project.id = work_item.project_id
+                 WHERE work_item.id = ?1",
+                rusqlite::params![item_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "That bill item was not found.".to_string())?;
+        access::require_access(&firm.conn, &account, "view", "project", Some(&project_code))?;
+        ledger::read(&firm.conn, item_id)
+    })
+}
+
+#[tauri::command]
 fn list_items(state: tauri::State<AppState>, project_code: String) -> Result<Vec<codes::WorkItem>, String> {
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
@@ -429,11 +450,14 @@ fn save_item(
     cbs_id: i64,
     cost_id: i64,
     unit_id: i64,
+    work_id: Option<i64>,
+    discipline_id: Option<i64>,
+    package_id: Option<i64>,
 ) -> Result<codes::WorkItem, String> {
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
         access::require_access(&firm.conn, &account, "create", "project", Some(&project_code))?;
-        codes::save_item(
+        codes::save_classified(
             &firm.conn,
             &project_code,
             parent_id,
@@ -445,6 +469,9 @@ fn save_item(
             cbs_id,
             cost_id,
             unit_id,
+            work_id,
+            discipline_id,
+            package_id,
         )
     })
 }
@@ -583,6 +610,19 @@ fn add_contract_item(
     with_firm(&state, |firm| {
         access::require_access(&firm.conn, &account, "create", "contract", None)?;
         contract::add_contract_item(&firm.conn, contract_id, &description, &quantity, &rate)
+    })
+}
+
+#[tauri::command]
+fn link_contract_item(
+    state: tauri::State<AppState>,
+    contract_id: i64,
+    item_id: i64,
+) -> Result<contract::ContractView, String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "create", "contract", None)?;
+        contract::link_contract_item(&firm.conn, contract_id, item_id)
     })
 }
 
@@ -1011,6 +1051,7 @@ pub fn run() {
             list_codes,
             save_code,
             list_items,
+            item_ledger,
             save_item,
             list_measures,
             add_measure,
@@ -1021,6 +1062,7 @@ pub fn run() {
             save_contract,
             save_work_order,
             add_contract_item,
+            link_contract_item,
             save_certificate,
             save_variation,
             approve_variation,

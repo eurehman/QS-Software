@@ -1,0 +1,271 @@
+use rusqlite::{params, Connection};
+use serde::Serialize;
+
+use crate::codes::format_number;
+
+const ZERO: &str = "0";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuantityLedger {
+    pub item_id: i64,
+    pub original_qty: String,
+    pub revised_qty: String,
+    pub planned_qty: String,
+    pub contract_qty: String,
+    pub executed_qty: String,
+    pub measured_qty: String,
+    pub certified_qty: String,
+    pub billed_qty: String,
+    pub paid_qty: String,
+    pub forecast_qty: String,
+    pub final_qty: String,
+    pub remaining_qty: String,
+}
+
+pub fn ensure_seed(conn: &Connection, item_id: i64) -> Result<(), String> {
+    let quantity: String = conn
+        .query_row(
+            "SELECT quantity FROM work_item WHERE id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "That bill item was not found.".to_string())?;
+    let opening = number_text(&quantity)?;
+    conn.execute(
+        "INSERT INTO quantity_ledger (
+            item_id, original_qty, revised_qty, planned_qty, contract_qty,
+            executed_qty, measured_qty, certified_qty, billed_qty, paid_qty,
+            forecast_qty, final_qty
+         ) VALUES (?1, ?2, ?2, ?3, ?2, ?3, ?3, ?3, ?3, ?3, ?3, ?3)
+         ON CONFLICT(item_id) DO NOTHING",
+        params![item_id, opening, ZERO],
+    )
+    .map_err(|err| err.to_string())?;
+    rollup_parents(conn, item_id)
+}
+
+pub fn set_measured(conn: &Connection, item_id: i64, quantity: &str) -> Result<(), String> {
+    let measured = number_text(quantity)?;
+    let updated = conn
+        .execute(
+            "UPDATE quantity_ledger SET measured_qty = ?1 WHERE item_id = ?2",
+            params![measured, item_id],
+        )
+        .map_err(|err| err.to_string())?;
+    if updated == 0 {
+        return Err("That bill item has no quantity ledger.".into());
+    }
+    rollup_parents(conn, item_id)
+}
+
+pub fn read(conn: &Connection, item_id: i64) -> Result<QuantityLedger, String> {
+    let row = raw(conn, item_id)?.ok_or_else(|| "That bill item has no quantity ledger.".to_string())?;
+    Ok(with_remaining(item_id, row))
+}
+
+fn rollup_parents(conn: &Connection, item_id: i64) -> Result<(), String> {
+    let mut current: Option<i64> = conn
+        .query_row(
+            "SELECT parent_id FROM work_item WHERE id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    while let Some(parent_id) = current {
+        rewrite_parent(conn, parent_id)?;
+        current = conn
+            .query_row(
+                "SELECT parent_id FROM work_item WHERE id = ?1",
+                params![parent_id],
+                |row| row.get(0),
+            )
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn rewrite_parent(conn: &Connection, parent_id: i64) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM work_item WHERE parent_id = ?1 ORDER BY id")
+        .map_err(|err| err.to_string())?;
+    let children = stmt
+        .query_map(params![parent_id], |row| row.get::<_, i64>(0))
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    let mut sums = [0.0; 11];
+    for child_id in children {
+        if let Some(row) = raw(conn, child_id)? {
+            for (index, value) in row.iter().enumerate() {
+                sums[index] += parse_number(value)?;
+            }
+        }
+    }
+    let text: Vec<String> = sums.iter().copied().map(format_number).collect();
+    conn.execute(
+        "INSERT INTO quantity_ledger (
+            item_id, original_qty, revised_qty, planned_qty, contract_qty,
+            executed_qty, measured_qty, certified_qty, billed_qty, paid_qty,
+            forecast_qty, final_qty
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+         ON CONFLICT(item_id) DO UPDATE SET
+            original_qty = excluded.original_qty,
+            revised_qty = excluded.revised_qty,
+            planned_qty = excluded.planned_qty,
+            contract_qty = excluded.contract_qty,
+            executed_qty = excluded.executed_qty,
+            measured_qty = excluded.measured_qty,
+            certified_qty = excluded.certified_qty,
+            billed_qty = excluded.billed_qty,
+            paid_qty = excluded.paid_qty,
+            forecast_qty = excluded.forecast_qty,
+            final_qty = excluded.final_qty",
+        params![
+            parent_id, text[0], text[1], text[2], text[3], text[4], text[5], text[6], text[7], text[8], text[9], text[10]
+        ],
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+fn raw(conn: &Connection, item_id: i64) -> Result<Option<[String; 11]>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT original_qty, revised_qty, planned_qty, contract_qty,
+                    executed_qty, measured_qty, certified_qty, billed_qty,
+                    paid_qty, forecast_qty, final_qty
+             FROM quantity_ledger WHERE item_id = ?1",
+        )
+        .map_err(|err| err.to_string())?;
+    let mut rows = stmt
+        .query(params![item_id])
+        .map_err(|err| err.to_string())?;
+    let Some(row) = rows.next().map_err(|err| err.to_string())? else {
+        return Ok(None);
+    };
+    Ok(Some([
+        row.get(0).map_err(|err| err.to_string())?,
+        row.get(1).map_err(|err| err.to_string())?,
+        row.get(2).map_err(|err| err.to_string())?,
+        row.get(3).map_err(|err| err.to_string())?,
+        row.get(4).map_err(|err| err.to_string())?,
+        row.get(5).map_err(|err| err.to_string())?,
+        row.get(6).map_err(|err| err.to_string())?,
+        row.get(7).map_err(|err| err.to_string())?,
+        row.get(8).map_err(|err| err.to_string())?,
+        row.get(9).map_err(|err| err.to_string())?,
+        row.get(10).map_err(|err| err.to_string())?,
+    ]))
+}
+
+fn with_remaining(item_id: i64, row: [String; 11]) -> QuantityLedger {
+    let original = parse_number(&row[0]).unwrap_or(0.0);
+    let certified = parse_number(&row[6]).unwrap_or(0.0);
+    let billed = parse_number(&row[7]).unwrap_or(0.0);
+    let used = certified.max(billed);
+    QuantityLedger {
+        item_id,
+        original_qty: row[0].clone(),
+        revised_qty: row[1].clone(),
+        planned_qty: row[2].clone(),
+        contract_qty: row[3].clone(),
+        executed_qty: row[4].clone(),
+        measured_qty: row[5].clone(),
+        certified_qty: row[6].clone(),
+        billed_qty: row[7].clone(),
+        paid_qty: row[8].clone(),
+        forecast_qty: row[9].clone(),
+        final_qty: row[10].clone(),
+        remaining_qty: format_number(original - used),
+    }
+}
+
+fn number_text(raw: &str) -> Result<String, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(ZERO.into());
+    }
+    Ok(format_number(parse_number(raw)?))
+}
+
+fn parse_number(raw: &str) -> Result<f64, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(0.0);
+    }
+    raw.parse::<f64>().map_err(|_| format!("{raw} is not a number."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::codes::{save_code, save_item, set_item_quantity};
+    use crate::db::create_firm;
+    use crate::project::save_project;
+
+    #[test]
+    fn concrete_opening_balances_are_100() {
+        let dir = tempfile::tempdir().unwrap();
+        let firm = create_firm(&dir.path().join("company.qsdb"), "0.1.0").unwrap();
+        save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let wbs = save_code(&firm.conn, "wbs", "03.10", "Concrete").unwrap();
+        let cbs = save_code(&firm.conn, "cbs", "STR", "Structure").unwrap();
+        let cost = save_code(&firm.conn, "cost", "C310", "In-situ concrete").unwrap();
+        let unit = save_code(&firm.conn, "unit", "m3", "Cubic metre").unwrap();
+        let heading = save_item(
+            &firm.conn,
+            "TWR",
+            None,
+            1,
+            "Structure",
+            "",
+            "",
+            wbs.id,
+            cbs.id,
+            cost.id,
+            unit.id,
+        )
+        .unwrap();
+        let item = save_item(
+            &firm.conn,
+            "TWR",
+            Some(heading.id),
+            1,
+            "Concrete — Structural",
+            "100",
+            "1",
+            wbs.id,
+            cbs.id,
+            cost.id,
+            unit.id,
+        )
+        .unwrap();
+        let ledger = read(&firm.conn, item.id).unwrap();
+        assert_eq!(ledger.original_qty, "100");
+        assert_eq!(ledger.revised_qty, "100");
+        assert_eq!(ledger.planned_qty, "0");
+        assert_eq!(ledger.contract_qty, "100");
+        assert_eq!(ledger.executed_qty, "0");
+        assert_eq!(ledger.measured_qty, "0");
+        assert_eq!(ledger.certified_qty, "0");
+        assert_eq!(ledger.billed_qty, "0");
+        assert_eq!(ledger.paid_qty, "0");
+        assert_eq!(ledger.forecast_qty, "0");
+        assert_eq!(ledger.final_qty, "0");
+        assert_eq!(ledger.remaining_qty, "100");
+        let parent = read(&firm.conn, heading.id).unwrap();
+        assert_eq!(parent.original_qty, "100");
+        assert_eq!(parent.contract_qty, "100");
+        assert_eq!(parent.remaining_qty, "100");
+
+        set_item_quantity(&firm.conn, item.id, "35").unwrap();
+        let after = read(&firm.conn, item.id).unwrap();
+        assert_eq!(after.original_qty, "100");
+        assert_eq!(after.contract_qty, "100");
+        assert_eq!(after.measured_qty, "35");
+        assert_eq!(after.certified_qty, "0");
+        assert_eq!(after.billed_qty, "0");
+        assert_eq!(after.remaining_qty, "100");
+    }
+}

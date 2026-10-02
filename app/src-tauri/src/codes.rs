@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-const KINDS: &[&str] = &["wbs", "cbs", "cost", "unit"];
+const KINDS: &[&str] = &["wbs", "cbs", "cost", "unit", "work", "discipline", "package"];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +26,9 @@ pub struct WorkItem {
     pub cbs_code: String,
     pub cost_code: String,
     pub unit_code: String,
+    pub work_code: String,
+    pub discipline_code: String,
+    pub package_code: String,
 }
 
 pub fn save_code(conn: &Connection, kind: &str, code: &str, name: &str) -> Result<CodeEntry, String> {
@@ -33,7 +36,7 @@ pub fn save_code(conn: &Connection, kind: &str, code: &str, name: &str) -> Resul
     let code = code.trim();
     let name = name.trim();
     if !KINDS.contains(&kind) {
-        return Err("Choose WBS, CBS, cost, or unit.".into());
+        return Err("Choose WBS, CBS, cost, unit, work, discipline, or package.".into());
     }
     if code.is_empty() || name.is_empty() {
         return Err("Enter a code and a name.".into());
@@ -62,7 +65,7 @@ pub fn save_code(conn: &Connection, kind: &str, code: &str, name: &str) -> Resul
 pub fn list_codes(conn: &Connection, kind: &str) -> Result<Vec<CodeEntry>, String> {
     let kind = kind.trim();
     if !KINDS.contains(&kind) {
-        return Err("Choose WBS, CBS, cost, or unit.".into());
+        return Err("Choose WBS, CBS, cost, unit, work, discipline, or package.".into());
     }
     let mut stmt = conn
         .prepare("SELECT id, kind, code, name FROM code_entry WHERE kind = ?1 ORDER BY code")
@@ -92,6 +95,40 @@ pub fn save_item(
     cbs_id: i64,
     cost_id: i64,
     unit_id: i64,
+) -> Result<WorkItem, String> {
+    save_classified(
+        conn,
+        project_code,
+        parent_id,
+        version_no,
+        name,
+        quantity,
+        rate,
+        wbs_id,
+        cbs_id,
+        cost_id,
+        unit_id,
+        None,
+        None,
+        None,
+    )
+}
+
+pub fn save_classified(
+    conn: &Connection,
+    project_code: &str,
+    parent_id: Option<i64>,
+    version_no: i64,
+    name: &str,
+    quantity: &str,
+    rate: &str,
+    wbs_id: i64,
+    cbs_id: i64,
+    cost_id: i64,
+    unit_id: i64,
+    work_id: Option<i64>,
+    discipline_id: Option<i64>,
+    package_id: Option<i64>,
 ) -> Result<WorkItem, String> {
     let name = name.trim();
     let quantity = quantity.trim();
@@ -128,16 +165,24 @@ pub fn save_item(
     expect_kind(conn, cbs_id, "cbs")?;
     expect_kind(conn, cost_id, "cost")?;
     expect_kind(conn, unit_id, "unit")?;
+    let work_id = optional_kind(conn, work_id, "work")?;
+    let discipline_id = optional_kind(conn, discipline_id, "discipline")?;
+    let package_id = optional_kind(conn, package_id, "package")?;
     let amount = line_amount(quantity, rate)?;
     conn.execute(
         "INSERT INTO work_item
-           (project_id, parent_id, version_no, name, quantity, rate, amount, wbs_id, cbs_id, cost_id, unit_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![project_id, parent_id, version_no, name, quantity, rate, amount, wbs_id, cbs_id, cost_id, unit_id],
+           (project_id, parent_id, version_no, name, quantity, rate, amount,
+            wbs_id, cbs_id, cost_id, unit_id, work_id, discipline_id, package_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        params![
+            project_id, parent_id, version_no, name, quantity, rate, amount,
+            wbs_id, cbs_id, cost_id, unit_id, work_id, discipline_id, package_id
+        ],
     )
     .map_err(|err| err.to_string())?;
     let id = conn.last_insert_rowid();
     refresh_amounts(conn, id)?;
+    crate::ledger::ensure_seed(conn, id)?;
     list_items(conn, project_code)?
         .into_iter()
         .find(|item| item.id == id)
@@ -149,13 +194,17 @@ pub fn list_items(conn: &Connection, project_code: &str) -> Result<Vec<WorkItem>
         .prepare(
             "SELECT item.id, item.parent_id, item.version_no, item.name,
                     item.quantity, item.rate, item.amount,
-                    wbs.code, cbs.code, cost.code, unit.code
+                    wbs.code, cbs.code, cost.code, unit.code,
+                    COALESCE(work.code, ''), COALESCE(discipline.code, ''), COALESCE(package.code, '')
              FROM work_item item
              JOIN project ON project.id = item.project_id
              JOIN code_entry wbs ON wbs.id = item.wbs_id
              JOIN code_entry cbs ON cbs.id = item.cbs_id
              JOIN code_entry cost ON cost.id = item.cost_id
              JOIN code_entry unit ON unit.id = item.unit_id
+             LEFT JOIN code_entry work ON work.id = item.work_id
+             LEFT JOIN code_entry discipline ON discipline.id = item.discipline_id
+             LEFT JOIN code_entry package ON package.id = item.package_id
              WHERE project.code = ?1
              ORDER BY item.version_no, item.id",
         )
@@ -174,6 +223,9 @@ pub fn list_items(conn: &Connection, project_code: &str) -> Result<Vec<WorkItem>
                 cbs_code: row.get(8)?,
                 cost_code: row.get(9)?,
                 unit_code: row.get(10)?,
+                work_code: row.get(11)?,
+                discipline_code: row.get(12)?,
+                package_code: row.get(13)?,
             })
         })
         .map_err(|err| err.to_string())?;
@@ -191,12 +243,14 @@ pub(crate) fn set_item_quantity(conn: &Connection, item_id: i64, quantity: &str)
     if children > 0 {
         return Err("A heading quantity comes from its children.".into());
     }
+    crate::ledger::ensure_seed(conn, item_id)?;
     conn.execute(
         "UPDATE work_item SET quantity = ?1 WHERE id = ?2",
         params![quantity.trim(), item_id],
     )
     .map_err(|err| err.to_string())?;
-    refresh_amounts(conn, item_id)
+    refresh_amounts(conn, item_id)?;
+    crate::ledger::set_measured(conn, item_id, quantity)
 }
 
 pub(crate) fn set_item_rate(conn: &Connection, item_id: i64, rate: &str) -> Result<(), String> {
@@ -280,6 +334,15 @@ fn refresh_amounts(conn: &Connection, start_id: i64) -> Result<(), String> {
     Ok(())
 }
 
+fn optional_kind(conn: &Connection, id: Option<i64>, kind: &str) -> Result<Option<i64>, String> {
+    if let Some(id) = id {
+        expect_kind(conn, id, kind)?;
+        Ok(Some(id))
+    } else {
+        Ok(None)
+    }
+}
+
 fn expect_kind(conn: &Connection, id: i64, kind: &str) -> Result<(), String> {
     let found: String = conn
         .query_row("SELECT kind FROM code_entry WHERE id = ?1", params![id], |row| row.get(0))
@@ -353,5 +416,33 @@ mod tests {
         let original = list_items(&firm.conn, "TWR").unwrap();
         assert_eq!(original.iter().find(|item| item.id == slab.id).unwrap().amount, "25");
         assert_eq!(original.iter().filter(|item| item.version_no == 1).count(), 3);
+    }
+
+    #[test]
+    fn two_items_share_a_work_package() {
+        let dir = tempfile::tempdir().unwrap();
+        let firm = create_firm(&dir.path().join("company.qsdb"), "0.1.0").unwrap();
+        save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let wbs = save_code(&firm.conn, "wbs", "03.10", "Concrete").unwrap();
+        let cbs = save_code(&firm.conn, "cbs", "STR", "Structure").unwrap();
+        let cost = save_code(&firm.conn, "cost", "C310", "In-situ concrete").unwrap();
+        let unit = save_code(&firm.conn, "unit", "m3", "Cubic metre").unwrap();
+        let work = save_code(&firm.conn, "work", "C31", "Concreting").unwrap();
+        let discipline = save_code(&firm.conn, "discipline", "CIV", "Civil").unwrap();
+        let package = save_code(&firm.conn, "package", "CW-01", "Concrete works").unwrap();
+        save_classified(
+            &firm.conn, "TWR", None, 1, "Slab", "1", "1",
+            wbs.id, cbs.id, cost.id, unit.id, Some(work.id), Some(discipline.id), Some(package.id),
+        )
+        .unwrap();
+        save_classified(
+            &firm.conn, "TWR", None, 1, "Beam", "1", "1",
+            wbs.id, cbs.id, cost.id, unit.id, Some(work.id), Some(discipline.id), Some(package.id),
+        )
+        .unwrap();
+        let items = list_items(&firm.conn, "TWR").unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|item| item.package_code == "CW-01" && item.discipline_code == "CIV" && item.work_code == "C31"));
+        assert_eq!(list_codes(&firm.conn, "package").unwrap().len(), 1);
     }
 }

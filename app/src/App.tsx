@@ -19,6 +19,7 @@ import {
   listAudit,
   listCodes,
   listItems,
+  itemLedger,
   listMeasures,
   addMeasure,
   addMaterialMove,
@@ -44,6 +45,7 @@ import {
   approveBill,
   approveBoq,
   addContractItem,
+  linkContractItem,
   exportLocalWorkbook,
   exportReport,
   addLocation,
@@ -85,6 +87,7 @@ import {
   type Project,
   type Reconciliation,
   type ReportLine,
+  type QuantityLedger,
   type WorkItem,
 } from "./api";
 
@@ -504,6 +507,7 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
   const [code, setCode] = useState("");
   const [projectName, setProjectName] = useState("");
   const [label, setLabel] = useState("");
+  const [locationKind, setLocationKind] = useState("tower");
   const [locationName, setLocationName] = useState("");
   const [parentId, setParentId] = useState("");
 
@@ -532,7 +536,7 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
   return (
     <>
       <h1>Projects</h1>
-      <p className="muted">Each project can use its own location labels and depth.</p>
+      <p className="muted">Each project can use its own location labels and depth. A location can be a development, building, tower, floor, unit, zone, or a custom label.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -577,14 +581,15 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
           <ul className="users">
             {nodes.map((node) => (
               <li key={node.id} style={{ paddingLeft: depth(node) * 16 }}>
-                {node.label}: {node.name}
+                {node.kind === "custom" ? node.label : node.kind}: {node.name}
+                {node.kind !== "custom" && node.label.toLowerCase() !== node.kind ? ` · ${node.label}` : ""}
               </li>
             ))}
           </ul>
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              void addLocation(selected, parentId === "" ? null : Number(parentId), label, locationName)
+              void addLocation(selected, parentId === "" ? null : Number(parentId), locationKind, label, locationName)
                 .then(() => listLocations(selected))
                 .then((next) => {
                   setNodes(next);
@@ -604,8 +609,20 @@ function ProjectScreen({ onError }: { onError: (message: string) => void }) {
               </select>
             </label>
             <label>
+              Kind
+              <select value={locationKind} onChange={(event) => setLocationKind(event.target.value)}>
+                <option value="development">Development</option>
+                <option value="building">Building</option>
+                <option value="tower">Tower</option>
+                <option value="floor">Floor</option>
+                <option value="unit">Unit</option>
+                <option value="zone">Zone</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            <label>
               Label
-              <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Tower, Floor, Zone" />
+              <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Shown name of this level" />
             </label>
             <label>
               Location name
@@ -935,6 +952,12 @@ function ContractPanel({ projectCode, onError }: { projectCode: string; onError:
   const [thisBill, setThisBill] = useState("");
   const [variationId, setVariationId] = useState<number | null>(null);
   const [revisedSum, setRevisedSum] = useState("");
+  const [billItems, setBillItems] = useState<WorkItem[]>([]);
+  const [billItemId, setBillItemId] = useState("");
+
+  useEffect(() => {
+    void listItems(projectCode).then(setBillItems).catch((cause: unknown) => onError(text(cause)));
+  }, [projectCode]);
 
   return (
     <>
@@ -973,6 +996,30 @@ function ContractPanel({ projectCode, onError }: { projectCode: string; onError:
             <label>Work order name<input name="woName" /></label>
             <div className="actions">
               <button type="submit">Save work order</button>
+            </div>
+          </form>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (billItemId === "") return;
+              void linkContractItem(contractId, Number(billItemId))
+                .then((contract) => setValue(contract.value))
+                .catch((cause: unknown) => onError(text(cause)));
+            }}
+          >
+            <label>
+              Bill item
+              <select value={billItemId} onChange={(event) => setBillItemId(event.target.value)}>
+                <option value="">Choose</option>
+                {billItems.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · {item.quantity || "—"} {item.unitCode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="actions">
+              <button type="submit">Add the bill item</button>
             </div>
           </form>
           <form
@@ -1089,7 +1136,11 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
   const [cbs, setCbs] = useState<CodeEntry[]>([]);
   const [costs, setCosts] = useState<CodeEntry[]>([]);
   const [units, setUnits] = useState<CodeEntry[]>([]);
+  const [works, setWorks] = useState<CodeEntry[]>([]);
+  const [disciplines, setDisciplines] = useState<CodeEntry[]>([]);
+  const [packages, setPackages] = useState<CodeEntry[]>([]);
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [ledger, setLedger] = useState<QuantityLedger | null>(null);
   const [estimateTotal, setEstimateTotal] = useState("");
   const [measures, setMeasures] = useState<MeasureLine[]>([]);
   const [measureItem, setMeasureItem] = useState("");
@@ -1107,15 +1158,21 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
   const [cbsId, setCbsId] = useState("");
   const [costId, setCostId] = useState("");
   const [unitId, setUnitId] = useState("");
+  const [workId, setWorkId] = useState("");
+  const [disciplineId, setDisciplineId] = useState("");
+  const [packageId, setPackageId] = useState("");
   const [comparison, setComparison] = useState<Reconciliation | null>(null);
 
   async function refresh(nextKind = kind) {
-    const [shown, wbsRows, cbsRows, costRows, unitRows, itemRows] = await Promise.all([
+    const [shown, wbsRows, cbsRows, costRows, unitRows, workRows, disciplineRows, packageRows, itemRows] = await Promise.all([
       listCodes(nextKind),
       listCodes("wbs"),
       listCodes("cbs"),
       listCodes("cost"),
       listCodes("unit"),
+      listCodes("work"),
+      listCodes("discipline"),
+      listCodes("package"),
       listItems(projectCode),
     ]);
     setCatalog(shown);
@@ -1123,6 +1180,9 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
     setCbs(cbsRows);
     setCosts(costRows);
     setUnits(unitRows);
+    setWorks(workRows);
+    setDisciplines(disciplineRows);
+    setPackages(packageRows);
     setItems(itemRows);
   }
 
@@ -1133,7 +1193,7 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
   return (
     <>
       <h2>Codes</h2>
-      <p className="muted">WBS, CBS, cost codes, and units are shared. Two items can use the same code.</p>
+      <p className="muted">WBS, CBS, cost, unit, work, discipline, and package codes are shared. Two items can use the same code.</p>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -1157,6 +1217,9 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
             <option value="cbs">CBS</option>
             <option value="cost">Cost code</option>
             <option value="unit">Unit</option>
+            <option value="work">Work code</option>
+            <option value="discipline">Discipline</option>
+            <option value="package">Work package</option>
           </select>
         </label>
         <label>
@@ -1190,6 +1253,9 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
             Number(cbsId),
             Number(costId),
             Number(unitId),
+            workId === "" ? null : Number(workId),
+            disciplineId === "" ? null : Number(disciplineId),
+            packageId === "" ? null : Number(packageId),
           )
             .then(() => listItems(projectCode))
             .then((next) => {
@@ -1252,15 +1318,71 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
             {units.map((entry) => <option key={entry.id} value={entry.id}>{entry.code}</option>)}
           </select>
         </label>
+        <label>
+          Work code
+          <select value={workId} onChange={(event) => setWorkId(event.target.value)}>
+            <option value="">None</option>
+            {works.map((entry) => <option key={entry.id} value={entry.id}>{entry.code}</option>)}
+          </select>
+        </label>
+        <label>
+          Discipline
+          <select value={disciplineId} onChange={(event) => setDisciplineId(event.target.value)}>
+            <option value="">None</option>
+            {disciplines.map((entry) => <option key={entry.id} value={entry.id}>{entry.code}</option>)}
+          </select>
+        </label>
+        <label>
+          Work package
+          <select value={packageId} onChange={(event) => setPackageId(event.target.value)}>
+            <option value="">None</option>
+            {packages.map((entry) => <option key={entry.id} value={entry.id}>{entry.code}</option>)}
+          </select>
+        </label>
         <div className="actions">
           <button type="submit">Add item</button>
         </div>
       </form>
       <ul className="users">
         {items.map((item) => (
-          <li key={item.id}>v{item.versionNo} {item.name} · qty {item.quantity || "—"} × {item.rate || "—"} = {item.amount} · {item.wbsCode} · {item.unitCode}</li>
+          <li key={item.id}>
+            v{item.versionNo} {item.name} · qty {item.quantity || "—"} × {item.rate || "—"} = {item.amount} · {item.wbsCode} · {item.unitCode}{item.packageCode ? ` · ${item.packageCode}` : ""}
+            {" "}
+            <button
+              type="button"
+              onClick={() => {
+                void itemLedger(item.id)
+                  .then(setLedger)
+                  .catch((cause: unknown) => onError(text(cause)));
+              }}
+            >
+              Ledger
+            </button>
+          </li>
         ))}
       </ul>
+      {ledger !== null && (
+        <>
+          <h2>Quantity ledger</h2>
+          <p className="muted">
+            {items.find((item) => item.id === ledger.itemId)?.name ?? "Item"} · remaining is original minus the larger of certified and billed.
+          </p>
+          <ul className="users">
+            <li>Original {ledger.originalQty}</li>
+            <li>Revised {ledger.revisedQty}</li>
+            <li>Planned {ledger.plannedQty}</li>
+            <li>Contracted {ledger.contractQty}</li>
+            <li>Executed {ledger.executedQty}</li>
+            <li>Measured {ledger.measuredQty}</li>
+            <li>Certified {ledger.certifiedQty}</li>
+            <li>Billed {ledger.billedQty}</li>
+            <li>Paid {ledger.paidQty}</li>
+            <li>Forecast {ledger.forecastQty}</li>
+            <li>Final {ledger.finalQty}</li>
+            <li>Remaining {ledger.remainingQty}</li>
+          </ul>
+        </>
+      )}
       <form
         onSubmit={(event) => {
           event.preventDefault();

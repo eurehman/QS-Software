@@ -138,7 +138,13 @@ export async function listAudit(): Promise<AuditEvent[]> {
 }
 
 export type Project = { id: number; code: string; name: string };
-export type LocationNode = { id: number; parentId: number | null; label: string; name: string };
+export type LocationNode = {
+  id: number;
+  parentId: number | null;
+  kind: string;
+  label: string;
+  name: string;
+};
 
 export async function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
@@ -165,6 +171,9 @@ export type WorkItem = {
   cbsCode: string;
   costCode: string;
   unitCode: string;
+  workCode: string;
+  disciplineCode: string;
+  packageCode: string;
 };
 
 export async function listCodes(kind: string): Promise<CodeEntry[]> {
@@ -177,6 +186,26 @@ export async function saveCode(kind: string, code: string, name: string): Promis
 
 export async function listItems(projectCode: string): Promise<WorkItem[]> {
   return invoke<WorkItem[]>("list_items", { projectCode });
+}
+
+export type QuantityLedger = {
+  itemId: number;
+  originalQty: string;
+  revisedQty: string;
+  plannedQty: string;
+  contractQty: string;
+  executedQty: string;
+  measuredQty: string;
+  certifiedQty: string;
+  billedQty: string;
+  paidQty: string;
+  forecastQty: string;
+  finalQty: string;
+  remainingQty: string;
+};
+
+export async function itemLedger(itemId: number): Promise<QuantityLedger> {
+  return invoke<QuantityLedger>("item_ledger", { itemId });
 }
 
 export async function listMeasures(itemId: number): Promise<MeasureLine[]> {
@@ -248,6 +277,13 @@ export async function addContractItem(
   rate: string,
 ): Promise<{ id: number; value: string }> {
   return invoke("add_contract_item", { contractId, description, quantity, rate });
+}
+
+export async function linkContractItem(
+  contractId: number,
+  itemId: number,
+): Promise<{ id: number; value: string }> {
+  return invoke("link_contract_item", { contractId, itemId });
 }
 
 export type Certificate = {
@@ -352,6 +388,9 @@ export async function saveItem(
   cbsId: number,
   costId: number,
   unitId: number,
+  workId: number | null,
+  disciplineId: number | null,
+  packageId: number | null,
 ): Promise<WorkItem> {
   return invoke<WorkItem>("save_item", {
     projectCode,
@@ -364,16 +403,20 @@ export async function saveItem(
     cbsId,
     costId,
     unitId,
+    workId,
+    disciplineId,
+    packageId,
   });
 }
 
 export async function addLocation(
   projectCode: string,
   parentId: number | null,
+  kind: string,
   label: string,
   name: string,
 ): Promise<LocationNode> {
-  return invoke<LocationNode>("add_location", { projectCode, parentId, label, name });
+  return invoke<LocationNode>("add_location", { projectCode, parentId, kind, label, name });
 }
 
 export async function pickFolder(): Promise<string | null> {

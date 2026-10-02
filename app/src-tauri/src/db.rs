@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection};
 
-pub const SCHEMA_VERSION: i64 = 19;
+pub const SCHEMA_VERSION: i64 = 23;
 
 #[derive(Debug)]
 pub struct FirmFile {
@@ -487,6 +487,80 @@ fn migrate(conn: &Connection, from: i64) -> rusqlite::Result<()> {
             ",
         )?;
     }
+    if from < 20 {
+        conn.execute_batch(
+            "
+            CREATE TABLE quantity_ledger (
+              item_id INTEGER PRIMARY KEY REFERENCES work_item(id) ON DELETE CASCADE,
+              original_qty TEXT NOT NULL,
+              revised_qty TEXT NOT NULL,
+              planned_qty TEXT NOT NULL,
+              contract_qty TEXT NOT NULL,
+              executed_qty TEXT NOT NULL,
+              measured_qty TEXT NOT NULL,
+              certified_qty TEXT NOT NULL,
+              billed_qty TEXT NOT NULL,
+              paid_qty TEXT NOT NULL,
+              forecast_qty TEXT NOT NULL,
+              final_qty TEXT NOT NULL
+            );
+            INSERT INTO quantity_ledger (
+              item_id, original_qty, revised_qty, planned_qty, contract_qty,
+              executed_qty, measured_qty, certified_qty, billed_qty, paid_qty,
+              forecast_qty, final_qty
+            )
+            SELECT id,
+              CASE WHEN quantity = '' THEN '0' ELSE quantity END,
+              CASE WHEN quantity = '' THEN '0' ELSE quantity END,
+              '0',
+              CASE WHEN quantity = '' THEN '0' ELSE quantity END,
+              '0', '0', '0', '0', '0', '0', '0'
+            FROM work_item;
+            UPDATE app_meta SET value = '20' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
+    if from < 21 {
+        conn.execute_batch(
+            "
+            ALTER TABLE location_node ADD COLUMN kind TEXT NOT NULL DEFAULT 'custom';
+            UPDATE location_node SET kind = lower(label)
+            WHERE lower(label) IN ('development', 'building', 'tower', 'floor', 'unit', 'zone');
+            UPDATE app_meta SET value = '21' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
+    if from < 22 {
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys=OFF;
+            CREATE TABLE code_entry_new (
+              id INTEGER PRIMARY KEY,
+              kind TEXT NOT NULL CHECK (kind IN ('wbs', 'cbs', 'cost', 'unit', 'work', 'discipline', 'package')),
+              code TEXT NOT NULL COLLATE NOCASE,
+              name TEXT NOT NULL,
+              UNIQUE (kind, code)
+            );
+            INSERT INTO code_entry_new (id, kind, code, name)
+            SELECT id, kind, code, name FROM code_entry;
+            DROP TABLE code_entry;
+            ALTER TABLE code_entry_new RENAME TO code_entry;
+            ALTER TABLE work_item ADD COLUMN work_id INTEGER REFERENCES code_entry(id);
+            ALTER TABLE work_item ADD COLUMN discipline_id INTEGER REFERENCES code_entry(id);
+            ALTER TABLE work_item ADD COLUMN package_id INTEGER REFERENCES code_entry(id);
+            PRAGMA foreign_keys=ON;
+            UPDATE app_meta SET value = '22' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
+    if from < 23 {
+        conn.execute_batch(
+            "
+            ALTER TABLE contract_item ADD COLUMN item_id INTEGER REFERENCES work_item(id);
+            UPDATE app_meta SET value = '23' WHERE key = 'schema_version';
+            ",
+        )?;
+    }
     Ok(())
 }
 
@@ -500,7 +574,7 @@ mod tests {
         let path = dir.path().join("company.qsdb");
         let firm = create_firm(&path, "0.1.0").unwrap();
         assert!(path.exists());
-        assert_eq!(firm.schema_version, 19);
+        assert_eq!(firm.schema_version, 23);
         let stored: String = firm
             .conn
             .query_row(
@@ -509,9 +583,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(stored, "19");
+        assert_eq!(stored, "23");
         let again = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(again.schema_version, 19);
+        assert_eq!(again.schema_version, 23);
     }
 
     #[test]
@@ -528,7 +602,7 @@ mod tests {
         .unwrap();
         drop(conn);
         let firm = open_firm(&path, "0.1.0").unwrap();
-        assert_eq!(firm.schema_version, 19);
+        assert_eq!(firm.schema_version, 23);
         let tables: i64 = firm
             .conn
             .query_row(
