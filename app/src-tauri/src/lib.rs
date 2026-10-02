@@ -357,7 +357,7 @@ fn save_project(state: tauri::State<AppState>, code: String, name: String) -> Re
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
         access::require_access(&firm.conn, &account, "create", "project", None)?;
-        project::save_project(&firm.conn, &code, &name)
+        project::save_project_as(&firm.conn, &code, &name, &account.username)
     })
 }
 
@@ -405,7 +405,7 @@ fn save_code(
     let account = session_account(&state)?;
     with_firm(&state, |firm| {
         access::require_access(&firm.conn, &account, "create", "project", None)?;
-        codes::save_code(&firm.conn, &kind, &code, &name)
+        codes::save_code_as(&firm.conn, &kind, &code, &name, &account.username)
     })
 }
 
@@ -472,7 +472,27 @@ fn save_item(
             work_id,
             discipline_id,
             package_id,
+            &account.username,
         )
+    })
+}
+
+#[tauri::command]
+fn revise_item_quantity(state: tauri::State<AppState>, item_id: i64, quantity: String) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        let project_code: String = firm
+            .conn
+            .query_row(
+                "SELECT project.code FROM work_item
+                 JOIN project ON project.id = work_item.project_id
+                 WHERE work_item.id = ?1",
+                rusqlite::params![item_id],
+                |row| row.get(0),
+            )
+            .map_err(|_| "That bill item was not found.".to_string())?;
+        access::require_access(&firm.conn, &account, "create", "project", Some(&project_code))?;
+        codes::revise_quantity(&firm.conn, item_id, &quantity, &account.username)
     })
 }
 
@@ -701,6 +721,15 @@ fn export_report(state: tauri::State<AppState>, project_code: String, path: Stri
     with_firm(&state, |firm| {
         access::require_access(&firm.conn, &account, "export", "reports", Some(&project_code))?;
         report::export_report(&firm.conn, &project_code, std::path::Path::new(&path))
+    })
+}
+
+#[tauri::command]
+fn export_core(state: tauri::State<AppState>, project_code: String, path: String) -> Result<(), String> {
+    let account = session_account(&state)?;
+    with_firm(&state, |firm| {
+        access::require_access(&firm.conn, &account, "export", "reports", Some(&project_code))?;
+        ledger::export_core(&firm.conn, &project_code, std::path::Path::new(&path))
     })
 }
 
@@ -1053,6 +1082,7 @@ pub fn run() {
             list_items,
             item_ledger,
             save_item,
+            revise_item_quantity,
             list_measures,
             add_measure,
             save_rate,
@@ -1069,6 +1099,7 @@ pub fn run() {
             save_budget,
             project_report,
             export_report,
+            export_core,
             reconcile_boq,
             approve_boq,
             save_commitment,

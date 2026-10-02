@@ -22,17 +22,33 @@ pub struct LocationNode {
 const LOCATION_KINDS: &[&str] = &["development", "building", "tower", "floor", "unit", "zone", "custom"];
 
 pub fn save_project(conn: &Connection, code: &str, name: &str) -> Result<Project, String> {
+    save_project_as(conn, code, name, "")
+}
+
+pub fn save_project_as(conn: &Connection, code: &str, name: &str, username: &str) -> Result<Project, String> {
     let code = code.trim();
     let name = name.trim();
     if code.is_empty() || name.is_empty() {
         return Err("Enter a project code and name.".into());
     }
+    let previous = match conn.query_row(
+        "SELECT name FROM project WHERE code = ?1",
+        params![code],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(stored) => Some(stored),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(err) => return Err(err.to_string()),
+    };
     conn.execute(
         "INSERT INTO project (code, name) VALUES (?1, ?2)
          ON CONFLICT(code) DO UPDATE SET name = excluded.name",
         params![code, name],
     )
     .map_err(|err| err.to_string())?;
+    let old = previous.clone().unwrap_or_default();
+    let action = if previous.is_none() { "create" } else { "edit" };
+    crate::audit::record(conn, username, action, &format!("project:{code}"), &old, name)?;
     load_project(conn, code)
 }
 

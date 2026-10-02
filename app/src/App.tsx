@@ -35,6 +35,7 @@ import {
   saveBudget,
   saveEstimate,
   saveForecast,
+  reviseItemQuantity,
   saveItem,
   saveLibraryRate,
   saveLocationCost,
@@ -48,6 +49,7 @@ import {
   linkContractItem,
   exportLocalWorkbook,
   exportReport,
+  exportCore,
   addLocation,
   saveProject,
   pickFolder,
@@ -899,6 +901,17 @@ function ReportPanel({ projectCode, onError }: { projectCode: string; onError: (
         >
           Excel
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            void pickXlsxPath("save").then((path) => {
+              if (!path) return;
+              void exportCore(projectCode, path).catch((cause: unknown) => onError(text(cause)));
+            });
+          }}
+        >
+          Export core
+        </button>
         <button type="button" disabled={lines.length === 0} onClick={() => window.print()}>
           Print
         </button>
@@ -1358,6 +1371,24 @@ function CodePanel({ projectCode, onError }: { projectCode: string; onError: (me
             >
               Ledger
             </button>
+            <form
+              key={`${item.id}:${item.quantity}`}
+              className="actions"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                void reviseItemQuantity(item.id, String(form.get("quantity") ?? ""))
+                  .then(() => refresh())
+                  .catch((cause: unknown) => onError(text(cause)));
+              }}
+            >
+              <input
+                name="quantity"
+                aria-label={`Bill quantity for ${item.name}`}
+                defaultValue={item.quantity}
+              />
+              <button type="submit">Save quantity</button>
+            </form>
           </li>
         ))}
       </ul>

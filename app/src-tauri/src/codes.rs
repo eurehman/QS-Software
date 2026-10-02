@@ -32,6 +32,10 @@ pub struct WorkItem {
 }
 
 pub fn save_code(conn: &Connection, kind: &str, code: &str, name: &str) -> Result<CodeEntry, String> {
+    save_code_as(conn, kind, code, name, "")
+}
+
+pub fn save_code_as(conn: &Connection, kind: &str, code: &str, name: &str, username: &str) -> Result<CodeEntry, String> {
     let kind = kind.trim();
     let code = code.trim();
     let name = name.trim();
@@ -41,12 +45,24 @@ pub fn save_code(conn: &Connection, kind: &str, code: &str, name: &str) -> Resul
     if code.is_empty() || name.is_empty() {
         return Err("Enter a code and a name.".into());
     }
+    let previous = match conn.query_row(
+        "SELECT name FROM code_entry WHERE kind = ?1 AND code = ?2",
+        params![kind, code],
+        |row| row.get::<_, String>(0),
+    ) {
+        Ok(stored) => Some(stored),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(err) => return Err(err.to_string()),
+    };
     conn.execute(
         "INSERT INTO code_entry (kind, code, name) VALUES (?1, ?2, ?3)
          ON CONFLICT(kind, code) DO UPDATE SET name = excluded.name",
         params![kind, code, name],
     )
     .map_err(|err| err.to_string())?;
+    let old = previous.clone().unwrap_or_default();
+    let action = if previous.is_none() { "create" } else { "edit" };
+    crate::audit::record(conn, username, action, &format!("code:{kind}:{code}"), &old, name)?;
     conn.query_row(
         "SELECT id, kind, code, name FROM code_entry WHERE kind = ?1 AND code = ?2",
         params![kind, code],
@@ -111,6 +127,7 @@ pub fn save_item(
         None,
         None,
         None,
+        "",
     )
 }
 
@@ -129,6 +146,7 @@ pub fn save_classified(
     work_id: Option<i64>,
     discipline_id: Option<i64>,
     package_id: Option<i64>,
+    username: &str,
 ) -> Result<WorkItem, String> {
     let name = name.trim();
     let quantity = quantity.trim();
@@ -183,6 +201,8 @@ pub fn save_classified(
     let id = conn.last_insert_rowid();
     refresh_amounts(conn, id)?;
     crate::ledger::ensure_seed(conn, id)?;
+    crate::audit::record(conn, username, "create", &format!("bill:{id}"), "", name)?;
+    crate::audit::record(conn, username, "create", &format!("bill:{id}:quantity"), "", quantity)?;
     list_items(conn, project_code)?
         .into_iter()
         .find(|item| item.id == id)
@@ -230,6 +250,31 @@ pub fn list_items(conn: &Connection, project_code: &str) -> Result<Vec<WorkItem>
         })
         .map_err(|err| err.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|err| err.to_string())
+}
+
+pub fn revise_quantity(conn: &Connection, item_id: i64, quantity: &str, username: &str) -> Result<(), String> {
+    let quantity = quantity.trim();
+    parse_number(quantity)?;
+    let children: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM work_item WHERE parent_id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| err.to_string())?;
+    if children > 0 {
+        return Err("A heading quantity comes from its children.".into());
+    }
+    let old: String = conn
+        .query_row("SELECT quantity FROM work_item WHERE id = ?1", params![item_id], |row| row.get(0))
+        .map_err(|_| "That bill item was not found.".to_string())?;
+    conn.execute(
+        "UPDATE work_item SET quantity = ?1 WHERE id = ?2",
+        params![quantity, item_id],
+    )
+    .map_err(|err| err.to_string())?;
+    refresh_amounts(conn, item_id)?;
+    crate::audit::record(conn, username, "edit", &format!("bill:{item_id}:quantity"), &old, quantity)
 }
 
 pub(crate) fn set_item_quantity(conn: &Connection, item_id: i64, quantity: &str) -> Result<(), String> {
@@ -432,12 +477,12 @@ mod tests {
         let package = save_code(&firm.conn, "package", "CW-01", "Concrete works").unwrap();
         save_classified(
             &firm.conn, "TWR", None, 1, "Slab", "1", "1",
-            wbs.id, cbs.id, cost.id, unit.id, Some(work.id), Some(discipline.id), Some(package.id),
+            wbs.id, cbs.id, cost.id, unit.id, Some(work.id), Some(discipline.id), Some(package.id), "",
         )
         .unwrap();
         save_classified(
             &firm.conn, "TWR", None, 1, "Beam", "1", "1",
-            wbs.id, cbs.id, cost.id, unit.id, Some(work.id), Some(discipline.id), Some(package.id),
+            wbs.id, cbs.id, cost.id, unit.id, Some(work.id), Some(discipline.id), Some(package.id), "",
         )
         .unwrap();
         let items = list_items(&firm.conn, "TWR").unwrap();

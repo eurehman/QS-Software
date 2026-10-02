@@ -360,6 +360,10 @@ export async function exportReport(projectCode: string, path: string): Promise<R
   return invoke("export_report", { projectCode, path });
 }
 
+export async function exportCore(projectCode: string, path: string): Promise<void> {
+  await invoke("export_core", { projectCode, path });
+}
+
 export async function saveBudget(
   projectCode: string,
   amount: string,
@@ -375,6 +379,10 @@ export async function saveEstimate(
   rate: string,
 ): Promise<{ id: number; kind: string; versionNo: number; total: string }> {
   return invoke("save_estimate", { projectCode, kind, versionNo, area, rate });
+}
+
+export async function reviseItemQuantity(itemId: number, quantity: string): Promise<void> {
+  return invoke("revise_item_quantity", { itemId, quantity });
 }
 
 export async function saveItem(

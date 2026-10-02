@@ -36,7 +36,7 @@ One firm file stands in for the company. There is no company row.
 | user_account, role, role_permission, role_module, role_project | One administrator and at most four other users |
 | sheet_cell | The generic 8×40 sheet, not the bill |
 | backup_record | History of sheet backups |
-| audit_event | Sheet cell create, edit, and delete only |
+| audit_event | Sheet cells, and create or edit of a project, code, or bill quantity. User, time, old value, and new value. |
 | project | Code and name |
 | location_node | Parent/child tree. Kind is development, building, tower, floor, unit, zone, or custom. The label stays free. |
 | code_entry | Kinds: wbs, cbs, cost, unit, work, discipline, package |

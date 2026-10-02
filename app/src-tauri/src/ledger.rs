@@ -64,6 +64,68 @@ pub fn read(conn: &Connection, item_id: i64) -> Result<QuantityLedger, String> {
     Ok(with_remaining(item_id, row))
 }
 
+pub fn export_core(conn: &Connection, project_code: &str, path: &std::path::Path) -> Result<(), String> {
+    let (code, name): (String, String) = conn
+        .query_row(
+            "SELECT code, name FROM project WHERE code = ?1",
+            params![project_code.trim()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| format!("Project {} was not found.", project_code.trim()))?;
+    let mut code_stmt = conn
+        .prepare("SELECT kind, code, name FROM code_entry ORDER BY kind, code")
+        .map_err(|err| err.to_string())?;
+    let codes = code_stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+        .map_err(|err| err.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| err.to_string())?;
+    drop(code_stmt);
+    let mut code_rows = vec![vec!["Kind".into(), "Code".into(), "Name".into()]];
+    for (kind, entry_code, entry_name) in codes {
+        code_rows.push(vec![kind, entry_code, entry_name]);
+    }
+    let mut bill_rows = vec![vec![
+        "Item".into(),
+        "Unit".into(),
+        "Quantity".into(),
+        "Original".into(),
+        "Contracted".into(),
+        "Measured".into(),
+        "Certified".into(),
+        "Billed".into(),
+        "Remaining".into(),
+        "WBS".into(),
+        "CBS".into(),
+        "Package".into(),
+    ]];
+    for item in crate::codes::list_items(conn, project_code)? {
+        let ledger = read(conn, item.id)?;
+        bill_rows.push(vec![
+            item.name,
+            item.unit_code,
+            item.quantity,
+            ledger.original_qty,
+            ledger.contract_qty,
+            ledger.measured_qty,
+            ledger.certified_qty,
+            ledger.billed_qty,
+            ledger.remaining_qty,
+            item.wbs_code,
+            item.cbs_code,
+            item.package_code,
+        ]);
+    }
+    crate::xlsx::write_sheets(
+        path,
+        &[
+            ("Project", vec![vec!["Code".into(), "Name".into()], vec![code, name]]),
+            ("Codes", code_rows),
+            ("Bill", bill_rows),
+        ],
+    )
+}
+
 fn rollup_parents(conn: &Connection, item_id: i64) -> Result<(), String> {
     let mut current: Option<i64> = conn
         .query_row(
@@ -267,5 +329,41 @@ mod tests {
         assert_eq!(after.certified_qty, "0");
         assert_eq!(after.billed_qty, "0");
         assert_eq!(after.remaining_qty, "100");
+    }
+
+    #[test]
+    fn core_workbook_shows_100_cubic_metres() {
+        let dir = tempfile::tempdir().unwrap();
+        let firm = create_firm(&dir.path().join("company.qsdb"), "0.1.0").unwrap();
+        save_project(&firm.conn, "TWR", "Tower site").unwrap();
+        let wbs = save_code(&firm.conn, "wbs", "03.10", "Concrete").unwrap();
+        let cbs = save_code(&firm.conn, "cbs", "STR", "Structure").unwrap();
+        let cost = save_code(&firm.conn, "cost", "C310", "In-situ concrete").unwrap();
+        let unit = save_code(&firm.conn, "unit", "m3", "Cubic metre").unwrap();
+        save_item(
+            &firm.conn,
+            "TWR",
+            None,
+            1,
+            "Concrete — Structural",
+            "100",
+            "1",
+            wbs.id,
+            cbs.id,
+            cost.id,
+            unit.id,
+        )
+        .unwrap();
+        let path = dir.path().join("core.xlsx");
+        export_core(&firm.conn, "TWR", &path).unwrap();
+        let bill = crate::xlsx::read_sheet(&path, "Bill").unwrap();
+        let row = bill
+            .iter()
+            .find(|row| row.first().is_some_and(|cell| cell == "Concrete — Structural"))
+            .unwrap();
+        assert!(row.contains(&"100".to_string()));
+        assert!(row.contains(&"m3".to_string()));
+        let project = crate::xlsx::read_sheet(&path, "Project").unwrap();
+        assert_eq!(project[1][0], "TWR");
     }
 }

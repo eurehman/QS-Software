@@ -19,9 +19,31 @@ pub fn read_grid(path: &Path) -> Result<Vec<Vec<String>>, String> {
     Ok(rows)
 }
 
+pub fn read_sheet(path: &Path, name: &str) -> Result<Vec<Vec<String>>, String> {
+    let mut workbook = open_workbook_auto(path).map_err(|err| err.to_string())?;
+    let range = workbook.worksheet_range(name).map_err(|err| err.to_string())?;
+    let mut rows: Vec<Vec<String>> = range.rows().map(|row| row.iter().map(cell_text).collect()).collect();
+    while rows.last().is_some_and(|row| row.iter().all(|cell| cell.is_empty())) {
+        rows.pop();
+    }
+    Ok(rows)
+}
+
 pub fn write_grid(path: &Path, rows: &[Vec<String>]) -> Result<(), String> {
+    write_sheets(path, &[("Sheet1", rows.to_vec())])
+}
+
+pub fn write_sheets(path: &Path, sheets: &[(&str, Vec<Vec<String>>)]) -> Result<(), String> {
     let mut workbook = Workbook::new();
-    let sheet = workbook.add_worksheet();
+    for (name, rows) in sheets {
+        let sheet = workbook.add_worksheet();
+        sheet.set_name(*name).map_err(|err| err.to_string())?;
+        write_rows(sheet, rows)?;
+    }
+    workbook.save(path).map_err(|err| err.to_string())
+}
+
+fn write_rows(sheet: &mut rust_xlsxwriter::Worksheet, rows: &[Vec<String>]) -> Result<(), String> {
     for (row_index, row) in rows.iter().enumerate() {
         for (col_index, raw) in row.iter().enumerate() {
             if raw.is_empty() {
@@ -39,7 +61,7 @@ pub fn write_grid(path: &Path, rows: &[Vec<String>]) -> Result<(), String> {
             }
         }
     }
-    workbook.save(path).map_err(|err| err.to_string())
+    Ok(())
 }
 
 fn is_plain_number(raw: &str) -> bool {
